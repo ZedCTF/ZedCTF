@@ -1,27 +1,26 @@
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Index from "./pages/Index";
-import NotFound from "./pages/NotFound";
-
-const queryClient = new QueryClient();
-
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
-);
+function App() {
+  return (
+    <div className="min-h-screen bg-green-600 text-white flex items-center justify-center">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold mb-4">🚀 ZedCTF is Working!</h1>
+        <p className="text-xl">Cybersecurity Platform - Zambia</p>
+        <div className="mt-6 space-x-4">
+          <button className="bg-white text-green-600 px-6 py-2 rounded-lg font-semibold">
+            Home
+          </button>
+          <button className="bg-green-700 text-white px-6 py-2 rounded-lg font-semibold">
+            Challenges
+          </button>
+          <button className="bg-green-700 text-white px-6 py-2 rounded-lg font-semibold">
+            Compete
+          </button>
+          <button className="bg-green-700 text-white px-6 py-2 rounded-lg font-semibold">
+            Login
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default App;
