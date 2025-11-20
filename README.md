@@ -157,7 +157,7 @@ git push
 Your site will be live at:
 
 ```
-https://<username>.github.io/ZedCTF/
+https://zedctf.github.io/ZedCTF/
 ```
 
 ---
@@ -165,3 +165,4 @@ https://<username>.github.io/ZedCTF/
 # 🎉 Done!
 
 You can now run the ZedCTF web app locally on **Windows & Linux** and deploy it easily on **GitHub Pages**.
+
