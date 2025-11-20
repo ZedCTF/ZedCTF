@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react-swc'  // ← Use the SWC version
+import react from '@vitejs/plugin-react-swc'  // ← Use SWC plugin
 
 export default defineConfig({
   base: '/ZedCTF/',
