@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react-swc'  // ← Use SWC plugin
+import react from '@vitejs/plugin-react-swc'
+import { resolve } from 'path'
 
 export default defineConfig({
   base: '/ZedCTF/',
@@ -11,5 +12,10 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-  }
+  },
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src'),
+    },
+  },
 })
