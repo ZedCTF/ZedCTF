@@ -120,6 +120,19 @@ sudo chown -R $USER:$USER .
 
 You can now run the ZedCTF web app locally on **Windows & Linux** and deploy it easily on **GitHub Pages**.
 
+| Contributor                 | Role          | Task Description                                                | File(s) / Directory              | Due Date |
+| --------------------------- | ------------- | --------------------------------------------------------------- | -------------------------------- | -------- |
+| **James Soko**              | Reviewer      | Managing the GitHub repository & reviewing the website progress | All files                        | None     |
+| **Abby Mwale**              | Developer     | Working with the frontend                                       | `src/`                           | None     |
+| **Aaron Nyakapanda**        | Developer     | Working with the website colors and backend                     | `src/`, `.db`                    | None     |
+| **Joylad Janganzya**        | Developer     | Working with the backend                                        | `.db/`                           | None     |
+| **Evans Bwalya**            | Co-ordinator  | Commenting on the project and giving recommendations            | None                             | None     |
+| **William Ziba**            | President     | Helping out where neccessary                                    | All files                        | None     |
+| **Mary Chanda**             | Documentation | Updating README & maintaining documentation                     | `README.md`, `docs/`             | None     |
+| **Humphery Mwila Chileshe** | Documentation | Updating README & maintaining documentation                     | `README.md`, `docs/`             | None     |
+
+
+
 
 
 
