@@ -8,7 +8,7 @@ const Navbar = () => {
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center gap-2">
-            <img src="/favicon.png" alt="ZedCTF" className="w-8 h-8" />
+            <img src="public/favicon.png" alt="ZedCTF" className="w-8 h-8" />
             <span className="text-2xl font-bold text-green-600">ZedCTF</span>
           </div>
           
