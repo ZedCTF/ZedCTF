@@ -45,7 +45,7 @@ npm install
 npm run dev
 ```
 
-Open the link shown (e.g., **[http://localhost:5173](http://localhost:5173)**).
+Open the link shown (e.g., **[http://localhost:5173](http://localhost:5173/ZedCTF/)**).
 
 ---
 
@@ -56,6 +56,28 @@ npm run build
 ```
 
 This creates a `dist/` folder.
+
+---
+
+## 🛠 Step 5: Deploy on gh-pages
+
+```bash
+npm run deploy
+```
+
+Push changes:
+
+```bash
+git add .
+git commit -m "Deploy"
+git push origin main
+```
+
+Your site will be live at:
+
+```
+https://zedctf.github.io/ZedCTF/
+```
 
 ---
 
@@ -93,76 +115,9 @@ sudo chown -R $USER:$USER .
 
 ---
 
-# 🌐 2. Deploying on GitHub Pages
-
-## Step 1: Enable Pages
-
-Go to:
-
-```
-Repo → Settings → Pages
-```
-
-Select:
-
-* Branch: `gh-pages`
-* Folder: `/` or `dist/` depending on deployment
-
----
-
-# 🚀 GitHub Actions Deployment
-
-Create: `.github/workflows/deploy.yml`
-
-```yaml
-name: Deploy to GitHub Pages
-
-on:
-  push:
-    branches: [ main ]
-
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v3
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: 'lts'
-
-    - name: Install dependencies
-      run: npm install
-
-    - name: Build
-      run: npm run build
-
-    - name: Deploy
-      uses: peaceiris/actions-gh-pages@v3
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./dist
-```
-
-Push changes:
-
-```bash
-git add .
-git commit -m "Deploy"
-git push
-```
-
-Your site will be live at:
-
-```
-https://zedctf.github.io/ZedCTF/
-```
-
----
 
 # 🎉 Done!
 
 You can now run the ZedCTF web app locally on **Windows & Linux** and deploy it easily on **GitHub Pages**.
+
 
