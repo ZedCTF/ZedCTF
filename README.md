@@ -45,7 +45,7 @@ npm install
 npm run dev
 ```
 
-Open the link shown (e.g., **[http://localhost:5173](http://localhost:5173/ZedCTF/)**).
+Open the link shown (e.g., **[[http://localhost:5173](http://localhost:5173/ZedCTF/)](http://localhost:5173/ZedCTF/)**).
 
 ---
 
@@ -119,5 +119,6 @@ sudo chown -R $USER:$USER .
 # 🎉 Done!
 
 You can now run the ZedCTF web app locally on **Windows & Linux** and deploy it easily on **GitHub Pages**.
+
 
 
