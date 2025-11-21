@@ -1,3 +1,7 @@
+# ZedCTF
+###### Zambian Capture The Flag Platform 
+<img width="1024" height="1024" alt="Image" src="https://github.com/user-attachments/assets/a50039bb-261c-4659-841e-a32a2a5b439c" />
+###### © 2025 - 2026 IT Society ℗ Kapasa Makasa University
 # Running the TypeScript Web Locally & on GitHub (Windows & Linux)
 
 This guide explains **only** how to run the ZedCTF TypeScript web project **locally** and **on GitHub Pages**, on both **Windows** and **Linux**.
@@ -130,6 +134,7 @@ You can now run the ZedCTF web app locally on **Windows & Linux** and deploy it 
 | **William Ziba**            | President     | Helping out where neccessary                                    | All files                        | None     |
 | **Mary Chanda**             | Documentation | Updating README & maintaining documentation                     | `README.md`, `docs/`             | None     |
 | **Humphery Mwila Chileshe** | Documentation | Updating README & maintaining documentation                     | `README.md`, `docs/`             | None     |
+
 
 
 
