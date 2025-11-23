@@ -1,7 +1,8 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Index from './pages/Index';
 import Login from './pages/Login';
-import Signup from './pages/Signup'; // Add this import
+import Signup from './pages/Signup';
+import GitHubCallback from './pages/GitHubCallback';
 import NotFound from './pages/NotFound';
 
 function App() {
@@ -10,7 +11,8 @@ function App() {
       <Routes>
         <Route path="/" element={<Index />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/signup" element={<Signup />} /> {/* Add this route */}
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/auth/github/callback" element={<GitHubCallback />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </Router>
