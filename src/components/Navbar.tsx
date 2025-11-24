@@ -1,12 +1,31 @@
 // Navbar.tsx
 import { Button } from "@/components/ui/button";
-import { Bell, Menu, Search, Trophy, BookOpen, Home, Users, Activity, Flame, User } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Bell, Menu, Search, Trophy, BookOpen, Home, Users, Activity, Flame, User, LogOut } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import favicon from "/favicon.png";
 import { useState } from "react";
+import { useAuthContext } from "../contexts/AuthContext";
+import { signOut } from "firebase/auth";
+import { auth } from "../firebase";
 
 const Navbar = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { user } = useAuthContext();
+  const navigate = useNavigate();
+  const [logoutLoading, setLogoutLoading] = useState(false);
+
+  const handleLogout = async () => {
+    setLogoutLoading(true);
+    try {
+      await signOut(auth);
+      navigate("/");
+      setIsMobileMenuOpen(false);
+    } catch (error) {
+      console.error("Error signing out:", error);
+    } finally {
+      setLogoutLoading(false);
+    }
+  };
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-background/95 backdrop-blur-lg supports-[backdrop-filter]:bg-background/60">
@@ -93,13 +112,37 @@ const Navbar = () => {
               <Menu className="w-5 h-5" />
             </Button>
 
-            {/* Single Sign In button */}
-            <Link to="/login">
-              <Button variant="default" size="sm" className="bg-green-500 hover:bg-green-600 text-white animate-glow gap-2">
-                <User className="w-4 h-4" />
-                Sign In
-              </Button>
-            </Link>
+            {/* Conditional Auth Button */}
+            {user ? (
+              // Show when user is logged in
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-foreground/80 hidden sm:block">
+                  {user.displayName || user.email?.split('@')[0]}
+                </span>
+                <Button 
+                  variant="default" 
+                  size="sm" 
+                  className="bg-red-500 hover:bg-red-600 text-white gap-2"
+                  onClick={handleLogout}
+                  disabled={logoutLoading}
+                >
+                  {logoutLoading ? (
+                    <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
+                  ) : (
+                    <LogOut className="w-4 h-4" />
+                  )}
+                  {logoutLoading ? "..." : "Logout"}
+                </Button>
+              </div>
+            ) : (
+              // Show when user is logged out
+              <Link to="/login">
+                <Button variant="default" size="sm" className="bg-green-500 hover:bg-green-600 text-white animate-glow gap-2">
+                  <User className="w-4 h-4" />
+                  Sign In
+                </Button>
+              </Link>
+            )}
           </div>
         </div>
 
@@ -162,13 +205,30 @@ const Navbar = () => {
                 Writeups
               </Link>
               
+              {/* Conditional Mobile Auth Button */}
               <div className="px-4 pt-2 border-t border-border">
-                <Link to="/login" onClick={() => setIsMobileMenuOpen(false)}>
-                  <Button variant="default" className="w-full justify-start gap-2 bg-green-500 hover:bg-green-600">
-                    <User className="w-4 h-4" />
-                    Sign In
+                {user ? (
+                  <Button 
+                    variant="default" 
+                    className="w-full justify-start gap-2 bg-red-500 hover:bg-red-600"
+                    onClick={handleLogout}
+                    disabled={logoutLoading}
+                  >
+                    {logoutLoading ? (
+                      <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
+                    ) : (
+                      <LogOut className="w-4 h-4" />
+                    )}
+                    {logoutLoading ? "Signing out..." : "Logout"}
                   </Button>
-                </Link>
+                ) : (
+                  <Link to="/login" onClick={() => setIsMobileMenuOpen(false)}>
+                    <Button variant="default" className="w-full justify-start gap-2 bg-green-500 hover:bg-green-600">
+                      <User className="w-4 h-4" />
+                      Sign In
+                    </Button>
+                  </Link>
+                )}
               </div>
             </div>
           </div>
