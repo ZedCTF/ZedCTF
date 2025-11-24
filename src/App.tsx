@@ -1,7 +1,7 @@
 // src/App.tsx
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
-import { AdminProvider } from './contexts/AdminContext'; // Add this import
+import { AdminProvider } from './contexts/AdminContext';
 import AuthInitializer from './components/AuthInitializer';
 import ProtectedRoute from './components/ProtectedRoute';
 import Index from './pages/Index';
@@ -15,12 +15,13 @@ import Dashboard from './components/Dashboard';
 import Practice from './components/Practice';
 import LiveEvents from './components/LiveEvents';
 import Leaderboard from './components/Leaderboard';
-import AdminDashboard from './components/AdminDashboard'; // Add this import
+import AdminDashboard from './components/AdminDashboard';
+import ChallengeDetail from './components/ChallengeDetail'; // Add this import
 
 function App() {
   return (
     <AuthProvider>
-      <AdminProvider> {/* Add AdminProvider */}
+      <AdminProvider>
         <AuthInitializer>
           <Router basename="/ZedCTF">
             <Routes>
@@ -75,6 +76,16 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <CreateWriteup />
+                  </ProtectedRoute>
+                } 
+              />
+              
+              {/* Challenge Detail Route - ADD THIS */}
+              <Route 
+                path="/challenge/:challengeId" 
+                element={
+                  <ProtectedRoute>
+                    <ChallengeDetail />
                   </ProtectedRoute>
                 } 
               />

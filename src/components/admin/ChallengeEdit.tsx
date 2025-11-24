@@ -1,6 +1,6 @@
-// src/components/admin/ChallengeCreation.tsx
-import { useState } from "react";
-import { collection, addDoc } from "firebase/firestore";
+// src/components/admin/ChallengeEdit.tsx
+import { useState, useEffect } from "react";
+import { doc, updateDoc, getDoc } from "firebase/firestore";
 import { db } from "../../firebase";
 import { useAuthContext } from "../../contexts/AuthContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,10 +10,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { X, Plus, Upload, Link, FileText, User, ExternalLink, Star, Shield } from "lucide-react";
+import { X, Plus, Upload, Link, FileText, User, ExternalLink, Save, Star, Shield } from "lucide-react";
 
-interface ChallengeCreationProps {
+interface ChallengeEditProps {
+  challengeId: string;
   onBack: () => void;
+  onSave: () => void;
 }
 
 interface Question {
@@ -38,8 +40,10 @@ interface ExternalSource {
   license: string;
 }
 
-const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
+const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
   const { user } = useAuthContext();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -51,6 +55,7 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
     flagFormat: "CTF{.*}",
     hasMultipleQuestions: false,
     isExternalChallenge: false,
+    isActive: true,
     hints: [""],
     files: [] as FileAttachment[],
     creator: "",
@@ -68,39 +73,87 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
     challengeType: 'practice' as 'practice' | 'live' | 'past_event'
   });
 
-  const [questions, setQuestions] = useState<Question[]>([
-    { id: "1", question: "", points: 0, flag: "" }
-  ]);
-
-  const [loading, setLoading] = useState(false);
+  const [questions, setQuestions] = useState<Question[]>([]);
   const [showCustomCategory, setShowCustomCategory] = useState(false);
+
+  useEffect(() => {
+    loadChallenge();
+  }, [challengeId]);
+
+  const loadChallenge = async () => {
+    try {
+      const challengeDoc = await getDoc(doc(db, "challenges", challengeId));
+      if (challengeDoc.exists()) {
+        const challengeData = challengeDoc.data();
+        
+        // Set form data from challenge
+        setFormData({
+          title: challengeData.title || "",
+          description: challengeData.description || "",
+          category: challengeData.category || "web",
+          customCategory: challengeData.finalCategory || "",
+          difficulty: challengeData.difficulty || "easy",
+          points: challengeData.points || 100,
+          flag: challengeData.flag || "",
+          flagFormat: challengeData.flagFormat || "CTF{.*}",
+          hasMultipleQuestions: challengeData.hasMultipleQuestions || false,
+          isExternalChallenge: !!challengeData.attribution,
+          isActive: challengeData.isActive !== false,
+          hints: challengeData.hints || [""],
+          files: challengeData.files || [],
+          creator: challengeData.originalCreator?.name || "",
+          creatorUrl: challengeData.originalCreator?.url || "",
+          // NEW: Load practice fields
+          featuredOnPractice: challengeData.featuredOnPractice || false,
+          availableInPractice: challengeData.availableInPractice !== false,
+          challengeType: challengeData.challengeType || 'practice',
+          externalSource: {
+            ctfName: challengeData.attribution?.ctfName || "",
+            ctfUrl: challengeData.attribution?.ctfUrl || "",
+            originalAuthor: challengeData.attribution?.originalAuthor || "",
+            authorUrl: challengeData.attribution?.authorUrl || "",
+            license: challengeData.attribution?.license || "unknown"
+          }
+        });
+
+        // Set questions if it's a multi-question challenge
+        if (challengeData.hasMultipleQuestions && challengeData.questions) {
+          setQuestions(challengeData.questions);
+        }
+
+        // Show custom category if it exists
+        if (challengeData.finalCategory) {
+          setShowCustomCategory(true);
+          setFormData(prev => ({ ...prev, category: "custom" }));
+        }
+      }
+    } catch (error) {
+      console.error("Error loading challenge:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setSaving(true);
     
     try {
       const challengeData = {
         ...formData,
-        // Use custom category if selected, otherwise use predefined category
         finalCategory: showCustomCategory ? formData.customCategory : formData.category,
         questions: formData.hasMultipleQuestions ? questions : [],
-        createdAt: new Date(),
-        isActive: true,
-        solvedBy: [],
         hints: formData.hints.filter(hint => hint.trim() !== ""),
-        // Calculate total points for multi-question challenges
         totalPoints: formData.hasMultipleQuestions 
           ? questions.reduce((sum, q) => sum + q.points, 0)
           : formData.points,
-        // Creator information
-        createdBy: user?.uid,
-        createdByName: user?.displayName || user?.email,
+        updatedAt: new Date(),
+        updatedBy: user?.uid,
+        updatedByName: user?.displayName || user?.email,
         // NEW: Include practice fields
         featuredOnPractice: formData.featuredOnPractice,
         availableInPractice: formData.availableInPractice,
         challengeType: formData.challengeType,
-        // If it's an external challenge, include attribution
         ...(formData.isExternalChallenge && {
           attribution: {
             ...formData.externalSource,
@@ -109,7 +162,6 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
             importedAt: new Date()
           }
         }),
-        // If creator is specified (for challenges by other users)
         ...(formData.creator && {
           originalCreator: {
             name: formData.creator,
@@ -118,50 +170,18 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
         })
       };
 
-      await addDoc(collection(db, "challenges"), challengeData);
-      
-      alert("Challenge created successfully!");
-      resetForm();
+      await updateDoc(doc(db, "challenges", challengeId), challengeData);
+      alert("Challenge updated successfully!");
+      onSave();
     } catch (error) {
-      console.error("Error creating challenge:", error);
-      alert("Error creating challenge. Please try again.");
+      console.error("Error updating challenge:", error);
+      alert("Error updating challenge. Please try again.");
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  const resetForm = () => {
-    setFormData({
-      title: "",
-      description: "",
-      category: "web",
-      customCategory: "",
-      difficulty: "easy",
-      points: 100,
-      flag: "",
-      flagFormat: "CTF{.*}",
-      hasMultipleQuestions: false,
-      isExternalChallenge: false,
-      hints: [""],
-      files: [],
-      creator: "",
-      creatorUrl: "",
-      externalSource: {
-        ctfName: "",
-        ctfUrl: "",
-        originalAuthor: "",
-        authorUrl: "",
-        license: "unknown"
-      },
-      // NEW: Reset practice fields
-      featuredOnPractice: false,
-      availableInPractice: true,
-      challengeType: 'practice'
-    });
-    setQuestions([{ id: "1", question: "", points: 0, flag: "" }]);
-    setShowCustomCategory(false);
-  };
-
+  // Helper functions (same as ChallengeCreation)
   const addHint = () => {
     setFormData({
       ...formData,
@@ -218,7 +238,6 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
         });
       }
     } else {
-      // For file uploads, you would typically use a file input
       const input = document.createElement('input');
       input.type = 'file';
       input.onchange = (e) => {
@@ -227,7 +246,7 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
           const newFile: FileAttachment = {
             id: Date.now().toString(),
             name: file.name,
-            url: URL.createObjectURL(file), // Temporary URL for demo
+            url: URL.createObjectURL(file),
             type: 'file'
           };
           setFormData({
@@ -267,16 +286,95 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
     });
   };
 
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <div className="text-center">Loading challenge...</div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Create New Challenge</CardTitle>
+        <CardTitle>Edit Challenge</CardTitle>
         <CardDescription>
-          Add a new CTF challenge to the platform with advanced options
+          Update challenge details and configuration
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Status Toggle */}
+          <div className="flex items-center justify-between p-4 border rounded-lg">
+            <div>
+              <Label className="text-base">Challenge Status</Label>
+              <p className="text-sm text-muted-foreground">
+                Active challenges are visible to users
+              </p>
+            </div>
+            <Switch
+              checked={formData.isActive}
+              onCheckedChange={(checked) => setFormData({...formData, isActive: checked})}
+            />
+          </div>
+
+          {/* Practice Visibility */}
+          <div className="space-y-4 p-4 border rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Shield className="w-5 h-5" />
+                <Label className="text-base">Practice Visibility</Label>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="availableInPractice"
+                  checked={formData.availableInPractice}
+                  onCheckedChange={(checked) => setFormData({...formData, availableInPractice: checked})}
+                />
+                <Label htmlFor="availableInPractice" className="text-sm">
+                  Available in Practice
+                </Label>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="featuredOnPractice"
+                  checked={formData.featuredOnPractice}
+                  onCheckedChange={(checked) => setFormData({...formData, featuredOnPractice: checked})}
+                />
+                <Label htmlFor="featuredOnPractice" className="text-sm">
+                  <Star className="w-4 h-4 inline mr-1" />
+                  Featured on Practice
+                </Label>
+              </div>
+            </div>
+            
+            <div>
+              <Label htmlFor="challengeType">Challenge Type</Label>
+              <Select 
+                value={formData.challengeType} 
+                onValueChange={(value: 'practice' | 'live' | 'past_event') => setFormData({...formData, challengeType: value})}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="practice">Practice Challenge</SelectItem>
+                  <SelectItem value="live">Live Event Challenge</SelectItem>
+                  <SelectItem value="past_event">Past Event Challenge</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                "Practice" challenges appear in the Practice section. "Live Event" challenges are only available during events.
+              </p>
+            </div>
+          </div>
+
           {/* Basic Information */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
@@ -364,61 +462,6 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
                   required
                 />
               </div>
-            </div>
-          </div>
-
-          {/* Practice Visibility */}
-          <div className="space-y-4 p-4 border rounded-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Shield className="w-5 h-5" />
-                <Label className="text-base">Practice Visibility</Label>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="availableInPractice"
-                  checked={formData.availableInPractice}
-                  onCheckedChange={(checked) => setFormData({...formData, availableInPractice: checked})}
-                />
-                <Label htmlFor="availableInPractice" className="text-sm">
-                  Available in Practice
-                </Label>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="featuredOnPractice"
-                  checked={formData.featuredOnPractice}
-                  onCheckedChange={(checked) => setFormData({...formData, featuredOnPractice: checked})}
-                />
-                <Label htmlFor="featuredOnPractice" className="text-sm">
-                  <Star className="w-4 h-4 inline mr-1" />
-                  Featured on Practice
-                </Label>
-              </div>
-            </div>
-            
-            <div>
-              <Label htmlFor="challengeType">Challenge Type</Label>
-              <Select 
-                value={formData.challengeType} 
-                onValueChange={(value: 'practice' | 'live' | 'past_event') => setFormData({...formData, challengeType: value})}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="practice">Practice Challenge</SelectItem>
-                  <SelectItem value="live">Live Event Challenge</SelectItem>
-                  <SelectItem value="past_event">Past Event Challenge</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">
-                "Practice" challenges appear in the Practice section. "Live Event" challenges are only available during events.
-              </p>
             </div>
           </div>
 
@@ -546,13 +589,6 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
                       onChange={(e) => updateExternalSource('license', e.target.value)}
                     />
                   )}
-                </div>
-
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded">
-                  <p className="text-sm text-blue-800">
-                    <strong>Attribution Notice:</strong> This challenge will be displayed with proper 
-                    attribution to the original author and CTF platform.
-                  </p>
                 </div>
               </div>
             )}
@@ -768,11 +804,9 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
 
           {/* Action Buttons */}
           <div className="flex gap-2 pt-4">
-            <Button type="submit" disabled={loading}>
-              {loading ? "Creating..." : "Create Challenge"}
-            </Button>
-            <Button type="button" variant="outline" onClick={resetForm}>
-              Reset Form
+            <Button type="submit" disabled={saving}>
+              <Save className="w-4 h-4 mr-2" />
+              {saving ? "Saving..." : "Save Changes"}
             </Button>
             <Button type="button" variant="outline" onClick={onBack}>
               Cancel
@@ -784,4 +818,4 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
   );
 };
 
-export default ChallengeCreation;
+export default ChallengeEdit;

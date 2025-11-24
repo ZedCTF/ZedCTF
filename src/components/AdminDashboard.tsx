@@ -10,7 +10,8 @@ import {
   FileText, 
   BarChart3,
   Plus,
-  Settings
+  Settings,
+  List
 } from "lucide-react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
@@ -19,6 +20,8 @@ import { useNavigate } from "react-router-dom";
 // Import the new components we'll create
 import UserManagement from "./admin/UserManagement";
 import ChallengeCreation from "./admin/ChallengeCreation";
+import ChallengeManagement from "./admin/ChallengeManagement";
+import ChallengeEdit from "./admin/ChallengeEdit";
 import EventScheduling from "./admin/EventScheduling";
 import WriteupReview from "./admin/WriteupReview";
 import PlatformAnalytics from "./admin/PlatformAnalytics";
@@ -28,6 +31,7 @@ const AdminDashboard = () => {
   const { isAdmin, isModerator } = useAdminContext();
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState("overview");
+  const [selectedChallenge, setSelectedChallenge] = useState<any>(null);
 
   // Redirect if not admin/moderator
   if (!isAdmin && !isModerator) {
@@ -58,8 +62,27 @@ const AdminDashboard = () => {
     switch (activeView) {
       case "users":
         return <UserManagement onBack={() => setActiveView("overview")} />;
+      case "challenge-management":
+        return (
+          <ChallengeManagement 
+            onBack={() => setActiveView("overview")}
+            onCreateNew={() => setActiveView("create-challenge")}
+            onEditChallenge={(challenge) => {
+              setSelectedChallenge(challenge);
+              setActiveView("edit-challenge");
+            }}
+          />
+        );
       case "create-challenge":
-        return <ChallengeCreation onBack={() => setActiveView("overview")} />;
+        return <ChallengeCreation onBack={() => setActiveView("challenge-management")} />;
+      case "edit-challenge":
+        return (
+          <ChallengeEdit 
+            challengeId={selectedChallenge.id}
+            onBack={() => setActiveView("challenge-management")}
+            onSave={() => setActiveView("challenge-management")}
+          />
+        );
       case "schedule-event":
         return <EventScheduling onBack={() => setActiveView("overview")} />;
       case "review-writeups":
@@ -139,6 +162,13 @@ const AdminDashboard = () => {
             </Button>
             <Button 
               className="w-full justify-start gap-2"
+              onClick={() => setActiveView("challenge-management")}
+            >
+              <List className="w-4 h-4" />
+              Manage Challenges
+            </Button>
+            <Button 
+              className="w-full justify-start gap-2"
               onClick={() => setActiveView("schedule-event")}
             >
               <Plus className="w-4 h-4" />
@@ -204,7 +234,9 @@ const AdminDashboard = () => {
                 <h1 className="text-4xl font-bold mb-2">
                   {activeView === "overview" ? "Admin Dashboard" : 
                    activeView === "users" ? "User Management" :
+                   activeView === "challenge-management" ? "Challenge Management" :
                    activeView === "create-challenge" ? "Create Challenge" :
+                   activeView === "edit-challenge" ? "Edit Challenge" :
                    activeView === "schedule-event" ? "Schedule Event" :
                    activeView === "review-writeups" ? "Review Write-ups" :
                    activeView === "analytics" ? "Platform Analytics" :
@@ -221,9 +253,18 @@ const AdminDashboard = () => {
               {activeView !== "overview" && (
                 <Button 
                   variant="outline" 
-                  onClick={() => setActiveView("overview")}
+                  onClick={() => {
+                    if (activeView === "create-challenge" || activeView === "edit-challenge") {
+                      setActiveView("challenge-management");
+                    } else {
+                      setActiveView("overview");
+                    }
+                  }}
                 >
-                  Back to Dashboard
+                  {activeView === "create-challenge" || activeView === "edit-challenge" 
+                    ? "Back to Challenges" 
+                    : "Back to Dashboard"
+                  }
                 </Button>
               )}
             </div>

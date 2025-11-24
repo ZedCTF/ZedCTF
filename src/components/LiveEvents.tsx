@@ -1,10 +1,13 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Clock, Users, Zap, Calendar, Trophy } from "lucide-react";
+import { Clock, Users, Zap, Calendar, Trophy, Shield } from "lucide-react";
 import { useEffect, useState } from "react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
+import { collection, getDocs, query, where, orderBy, doc, updateDoc, arrayUnion } from "firebase/firestore";
+import { db } from "../firebase";
+import { useAuthContext } from "../contexts/AuthContext";
 
 interface LiveEvent {
   id: string;
@@ -17,6 +20,7 @@ interface LiveEvent {
   startTime: string;
   endTime: string;
   challengeCount: number;
+  registeredUsers?: string[];
 }
 
 interface UpcomingEvent {
@@ -30,44 +34,56 @@ interface UpcomingEvent {
   registered: boolean;
   maxParticipants?: number;
   description?: string;
+  registeredUsers?: string[];
 }
 
+// Base URL for navigation
+const BASE_URL = "/ZedCTF";
+
 const LiveEvents = () => {
+  const { user } = useAuthContext();
   const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Real API endpoints - update these with your actual backend URLs
+  // Fetch events from Firestore
   const fetchEventsData = async () => {
     try {
-      // Replace these with your actual API endpoints
-      const LIVE_EVENTS_API = '/api/events/live';
-      const UPCOMING_EVENTS_API = '/api/events/upcoming';
+      // Query for live events
+      const liveEventsQuery = query(
+        collection(db, "events"),
+        where("status", "in", ["LIVE", "STARTING_SOON"]),
+        orderBy("startTime", "asc")
+      );
 
-      const [liveResponse, upcomingResponse] = await Promise.all([
-        fetch(LIVE_EVENTS_API, {
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          }
-        }),
-        fetch(UPCOMING_EVENTS_API)
+      // Query for upcoming events
+      const upcomingEventsQuery = query(
+        collection(db, "events"),
+        where("status", "==", "UPCOMING"),
+        orderBy("startTime", "asc")
+      );
+
+      const [liveSnapshot, upcomingSnapshot] = await Promise.all([
+        getDocs(liveEventsQuery),
+        getDocs(upcomingEventsQuery)
       ]);
 
-      if (liveResponse.ok) {
-        const liveData = await liveResponse.json();
-        setLiveEvents(liveData);
-      } else {
-        setLiveEvents([]);
-      }
+      const liveData = liveSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as LiveEvent[];
 
-      if (upcomingResponse.ok) {
-        const upcomingData = await upcomingResponse.json();
-        setUpcomingEvents(upcomingData);
-      } else {
-        setUpcomingEvents([]);
-      }
+      const upcomingData = upcomingSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        registered: user ? doc.data().registeredUsers?.includes(user.uid) || false : false
+      })) as UpcomingEvent[];
+
+      setLiveEvents(liveData);
+      setUpcomingEvents(upcomingData);
+
     } catch (err) {
+      console.error("Error fetching events:", err);
       // Silent fail - just set empty arrays
       setLiveEvents([]);
       setUpcomingEvents([]);
@@ -77,43 +93,52 @@ const LiveEvents = () => {
   };
 
   const registerForEvent = async (eventId: string) => {
+    if (!user) {
+      alert("Please log in to register for events");
+      return;
+    }
+
     try {
-      // Replace with your actual registration endpoint
-      const response = await fetch('/api/events/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ eventId }),
+      const eventRef = doc(db, "events", eventId);
+      await updateDoc(eventRef, {
+        registeredUsers: arrayUnion(user.uid),
+        participants: (upcomingEvents.find(e => e.id === eventId)?.participants || 0) + 1
       });
 
-      if (response.ok) {
-        // Refresh events data to update registration status
-        fetchEventsData();
-      }
+      // Refresh events data to update registration status
+      fetchEventsData();
     } catch (error) {
       console.error('Failed to register for event:', error);
+      alert("Failed to register for event. Please try again.");
     }
   };
 
   const joinLiveEvent = async (eventId: string) => {
+    if (!user) {
+      alert("Please log in to join events");
+      return;
+    }
+
     try {
-      // Replace with your actual join event endpoint
-      const response = await fetch('/api/events/join', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ eventId }),
+      const eventRef = doc(db, "events", eventId);
+      await updateDoc(eventRef, {
+        participants: (liveEvents.find(e => e.id === eventId)?.participants || 0) + 1
       });
 
-      if (response.ok) {
-        // Redirect to competition page or show success
-        window.location.href = `/competition/${eventId}`;
-      }
+      // Redirect to competition page with base URL
+      window.location.href = `${BASE_URL}/competition/${eventId}`;
     } catch (error) {
       console.error('Failed to join live event:', error);
+      alert("Failed to join event. Please try again.");
     }
+  };
+
+  const navigateToPractice = () => {
+    window.location.href = `${BASE_URL}/practice`;
+  };
+
+  const navigateToChallenge = (challengeId: string) => {
+    window.location.href = `${BASE_URL}/challenge/${challengeId}`;
   };
 
   useEffect(() => {
@@ -123,7 +148,7 @@ const LiveEvents = () => {
     const interval = setInterval(fetchEventsData, 10000);
     
     return () => clearInterval(interval);
-  }, []);
+  }, [user]);
 
   if (loading) {
     return (
@@ -212,6 +237,22 @@ const LiveEvents = () => {
                 <Zap className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-50" />
                 <h3 className="text-xl font-bold mb-2">No Live Events</h3>
                 <p className="text-muted-foreground">Check back later for upcoming competitions</p>
+                
+                {/* Practice Section Call-to-Action */}
+                <div className="mt-6 pt-6 border-t border-border">
+                  <Shield className="w-12 h-12 text-primary mx-auto mb-3" />
+                  <h4 className="text-lg font-semibold mb-2">Want to Practice?</h4>
+                  <p className="text-muted-foreground mb-4">
+                    Sharpen your skills with our practice challenges while you wait for the next live event.
+                  </p>
+                  <Button 
+                    variant="terminal" 
+                    onClick={navigateToPractice}
+                  >
+                    <Shield className="w-4 h-4 mr-2" />
+                    Explore Practice Challenges
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -272,6 +313,28 @@ const LiveEvents = () => {
                 ))}
               </div>
             )}
+          </div>
+
+          {/* Practice Section Call-to-Action */}
+          <div className="max-w-4xl mx-auto mt-16">
+            <Card className="bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
+              <CardContent className="p-8 text-center">
+                <Shield className="w-16 h-16 text-primary mx-auto mb-4" />
+                <h3 className="text-2xl font-bold mb-2">Ready to Practice?</h3>
+                <p className="text-muted-foreground mb-6 max-w-2xl mx-auto">
+                  Access our extensive library of practice challenges covering web security, cryptography, 
+                  forensics, and more. Perfect for beginners and experts alike.
+                </p>
+                <Button 
+                  variant="terminal" 
+                  size="lg"
+                  onClick={navigateToPractice}
+                >
+                  <Shield className="w-5 h-5 mr-2" />
+                  Explore Practice Challenges
+                </Button>
+              </CardContent>
+            </Card>
           </div>
         </div>
       </section>
