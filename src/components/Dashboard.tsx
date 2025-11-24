@@ -1,6 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Trophy, Target, Clock, TrendingUp, User, Calendar, Activity } from "lucide-react";
+import { Trophy, Target, Clock, TrendingUp, User, Calendar, Activity, LogOut } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useAuthContext } from "../contexts/AuthContext";
+import { signOut } from "firebase/auth";
+import { auth, db } from "../firebase";
+import { useNavigate } from "react-router-dom";
+import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from "firebase/firestore";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 
@@ -11,6 +16,9 @@ interface UserStats {
   timeSpent: string;
   username: string;
   joinDate: string;
+  firstName?: string;
+  lastName?: string;
+  displayName?: string;
 }
 
 interface Challenge {
@@ -40,71 +48,164 @@ interface Activity {
 }
 
 const Dashboard = () => {
+  const { user } = useAuthContext();
+  const navigate = useNavigate();
   const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [solvedChallenges, setSolvedChallenges] = useState<Challenge[]>([]);
   const [eventsParticipated, setEventsParticipated] = useState<Event[]>([]);
   const [userActivity, setUserActivity] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
+  const [logoutLoading, setLogoutLoading] = useState(false);
 
-  // Fetch user dashboard data
+  // Handle logout
+  const handleLogout = async () => {
+    setLogoutLoading(true);
+    try {
+      await signOut(auth);
+      navigate("/");
+    } catch (error) {
+      console.error("Error signing out:", error);
+    } finally {
+      setLogoutLoading(false);
+    }
+  };
+
+  // Fetch user dashboard data from Firestore
   const fetchDashboardData = async () => {
+    if (!user) return;
+
     try {
       setLoading(true);
       
-      // Replace with your actual API endpoints
-      const USER_STATS_API = '/api/user/stats';
-      const SOLVED_CHALLENGES_API = '/api/user/challenges/solved';
-      const EVENTS_API = '/api/user/events/participated';
-      const ACTIVITY_API = '/api/user/activity';
+      console.log("Fetching dashboard data for user:", user.uid);
 
-      const [statsResponse, challengesResponse, eventsResponse, activityResponse] = await Promise.all([
-        fetch(USER_STATS_API),
-        fetch(SOLVED_CHALLENGES_API),
-        fetch(EVENTS_API),
-        fetch(ACTIVITY_API)
-      ]);
-
-      if (statsResponse.ok) {
-        const statsData = await statsResponse.json();
-        setUserStats(statsData);
+      // 1. Fetch user stats from Firestore
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        console.log("User data from Firestore:", userData);
+        
+        setUserStats({
+          totalPoints: userData.totalPoints || 0,
+          challengesSolved: userData.challengesSolved || 0,
+          currentRank: userData.currentRank || 0,
+          timeSpent: userData.timeSpent || "0h 0m",
+          username: userData.username || user?.email?.split('@')[0] || 'Hacker',
+          joinDate: userData.createdAt || user?.metadata.creationTime || new Date().toISOString(),
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+          displayName: userData.displayName
+        });
       } else {
-        setUserStats(null);
+        console.log("No user document found in Firestore");
+        // Set default stats if no user document exists
+        setUserStats({
+          totalPoints: 0,
+          challengesSolved: 0,
+          currentRank: 0,
+          timeSpent: "0h 0m",
+          username: user?.email?.split('@')[0] || 'Hacker',
+          joinDate: user?.metadata.creationTime || new Date().toISOString()
+        });
       }
 
-      if (challengesResponse.ok) {
-        const challengesData = await challengesResponse.json();
+      // 2. Fetch solved challenges (you'll need to create this collection later)
+      try {
+        const challengesQuery = query(
+          collection(db, "challenges"),
+          where("solvedBy", "array-contains", user.uid),
+          orderBy("solvedAt", "desc"),
+          limit(5)
+        );
+        const challengesSnapshot = await getDocs(challengesQuery);
+        const challengesData = challengesSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Challenge[];
         setSolvedChallenges(challengesData);
-      } else {
+      } catch (error) {
+        console.log("No challenges data yet, using empty array");
         setSolvedChallenges([]);
       }
 
-      if (eventsResponse.ok) {
-        const eventsData = await eventsResponse.json();
+      // 3. Fetch events participated (you'll need to create this collection later)
+      try {
+        const eventsQuery = query(
+          collection(db, "events"),
+          where("participants", "array-contains", user.uid),
+          orderBy("date", "desc"),
+          limit(5)
+        );
+        const eventsSnapshot = await getDocs(eventsQuery);
+        const eventsData = eventsSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Event[];
         setEventsParticipated(eventsData);
-      } else {
+      } catch (error) {
+        console.log("No events data yet, using empty array");
         setEventsParticipated([]);
       }
 
-      if (activityResponse.ok) {
-        const activityData = await activityResponse.json();
+      // 4. Fetch user activity (you'll need to create this collection later)
+      try {
+        const activityQuery = query(
+          collection(db, "activity"),
+          where("userId", "==", user.uid),
+          orderBy("timestamp", "desc"),
+          limit(10)
+        );
+        const activitySnapshot = await getDocs(activityQuery);
+        const activityData = activitySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Activity[];
         setUserActivity(activityData);
-      } else {
-        setUserActivity([]);
+      } catch (error) {
+        console.log("No activity data yet, using empty array");
+        // Add default account creation activity
+        setUserActivity([
+          {
+            id: "1",
+            action: "Account Created",
+            description: "Welcome to ZedCTF!",
+            timestamp: user?.metadata.creationTime || new Date().toISOString()
+          }
+        ]);
       }
 
     } catch (err) {
-      setUserStats(null);
+      console.error("Error fetching dashboard data:", err);
+      // Set fallback data
+      setUserStats({
+        totalPoints: 0,
+        challengesSolved: 0,
+        currentRank: 0,
+        timeSpent: "0h 0m",
+        username: user?.email?.split('@')[0] || 'Hacker',
+        joinDate: user?.metadata.creationTime || new Date().toISOString()
+      });
       setSolvedChallenges([]);
       setEventsParticipated([]);
-      setUserActivity([]);
+      setUserActivity([
+        {
+          id: "1",
+          action: "Account Created",
+          description: "Welcome to ZedCTF!",
+          timestamp: user?.metadata.creationTime || new Date().toISOString()
+        }
+      ]);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+    if (user) {
+      fetchDashboardData();
+    }
+  }, [user]);
 
   if (loading) {
     return (
@@ -126,28 +227,43 @@ const Dashboard = () => {
       <Navbar />
       <section id="dashboard" className="pt-24 pb-16 min-h-screen">
         <div className="container px-4 mx-auto">
-          {/* User Welcome Section */}
+          {/* User Welcome Section with Logout */}
           <div className="mb-8">
-            {userStats ? (
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-4 mb-4">
                 <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center">
                   <User className="w-8 h-8 text-primary" />
                 </div>
                 <div>
                   <h2 className="text-4xl font-bold">
-                    Welcome back, <span className="text-primary">{userStats.username}</span>
+                    Welcome back,{" "}
+                    <span className="text-primary">
+                      {userStats?.displayName || user?.displayName || userStats?.username || user?.email?.split('@')[0] || 'Hacker'}
+                    </span>
                   </h2>
                   <p className="text-muted-foreground">
-                    Member since {new Date(userStats.joinDate).toLocaleDateString()}
+                    {user?.email} • Member since{" "}
+                    {userStats?.joinDate
+                      ? new Date(userStats.joinDate).toLocaleDateString()
+                      : "recently"}
                   </p>
                 </div>
               </div>
-            ) : (
-              <div className="mb-12">
-                <h2 className="text-4xl font-bold mb-4">Your <span className="text-primary">Dashboard</span></h2>
-                <p className="text-muted-foreground">Track your progress and performance</p>
-              </div>
-            )}
+              
+              {/* Logout Button */}
+              <button
+                onClick={handleLogout}
+                disabled={logoutLoading}
+                className="flex items-center gap-2 px-4 py-2 bg-destructive text-destructive-foreground rounded-lg hover:bg-destructive/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {logoutLoading ? (
+                  <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
+                ) : (
+                  <LogOut className="w-4 h-4" />
+                )}
+                {logoutLoading ? "Signing out..." : "Logout"}
+              </button>
+            </div>
           </div>
 
           {/* Statistics Grid */}
