@@ -2,6 +2,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Trophy, Medal } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useEffect, useState } from "react";
+import Navbar from "./Navbar";
+import Footer from "./Footer";
 
 export interface CTFTeam {
   rank: number;
@@ -79,19 +81,25 @@ const Leaderboard = ({ eventName = "CTF Competition" }: LeaderboardProps) => {
 
   if (loading) {
     return (
-      <section id="leaderboard" className="py-24 bg-muted/20">
-        <div className="container px-4 mx-auto text-center">
-          <div className="animate-spin w-16 h-16 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
-          <p className="mt-4 text-muted-foreground">Loading leaderboard data...</p>
-        </div>
-      </section>
+      <>
+        <Navbar />
+        <section id="leaderboard" className="pt-24 pb-16 bg-muted/20 min-h-screen">
+          <div className="container px-4 mx-auto text-center">
+            <div className="animate-spin w-16 h-16 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
+            <p className="mt-4 text-muted-foreground">Loading leaderboard data...</p>
+          </div>
+        </section>
+        <Footer />
+      </>
     );
   }
 
   return (
     <>
+      <Navbar />
+      
       {/* Live CTF Competition Leaderboard */}
-      <section id="ctf-leaderboard" className="py-16 bg-background">
+      <section id="ctf-leaderboard" className="pt-24 pb-16 bg-background min-h-screen">
         <div className="container px-4 mx-auto">
           <div className="mb-8 text-center">
             <Trophy className="w-12 h-12 text-primary mx-auto mb-4" />
@@ -114,22 +122,22 @@ const Leaderboard = ({ eventName = "CTF Competition" }: LeaderboardProps) => {
             </CardHeader>
             <CardContent className="p-0">
               {ctfTeams.length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground">
-                  <Trophy className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                  <p>No scores available yet</p>
-                  <p className="text-sm mt-2">Leaderboard will update when competition starts</p>
+                <div className="text-center py-16 text-muted-foreground">
+                  <Trophy className="w-20 h-20 mx-auto mb-4 opacity-50" />
+                  <p className="text-lg mb-2">No scores available yet</p>
+                  <p className="text-sm">Leaderboard will update when competition starts</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead className="bg-muted/50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">#</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Team</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Captain</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Points</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Last Activity</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Challenge</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">#</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Team</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Captain</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Points</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Last Activity</th>
+                        <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Challenge</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
@@ -241,6 +249,8 @@ const Leaderboard = ({ eventName = "CTF Competition" }: LeaderboardProps) => {
           </Card>
         </div>
       </section>
+
+      <Footer />
     </>
   );
 };
