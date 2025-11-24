@@ -1,16 +1,18 @@
 // Navbar.tsx
 import { Button } from "@/components/ui/button";
-import { Bell, Menu, Search, Trophy, BookOpen, Home, Users, Activity, Flame, User, LogOut } from "lucide-react";
+import { Bell, Menu, Search, Trophy, BookOpen, Home, Users, Activity, Flame, User, LogOut, Shield } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import favicon from "/favicon.png";
 import { useState } from "react";
 import { useAuthContext } from "../contexts/AuthContext";
+import { useAdminContext } from "../contexts/AdminContext"; // Add this import
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 
 const Navbar = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { user } = useAuthContext();
+  const { isAdmin, isModerator } = useAdminContext(); // Add this
   const navigate = useNavigate();
   const [logoutLoading, setLogoutLoading] = useState(false);
 
@@ -87,6 +89,17 @@ const Navbar = () => {
               <BookOpen className="w-4 h-4 group-hover:scale-110 transition-transform" />
               Writeups
             </Link>
+
+            {/* Admin Link - Only show for admins/moderators */}
+            {(isAdmin || isModerator) && (
+              <Link 
+                to="/admin" 
+                className="flex items-center gap-2 text-foreground/80 hover:text-green-600 transition-colors group"
+              >
+                <Shield className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                Admin
+              </Link>
+            )}
           </div>
 
           {/* Search and Actions */}
@@ -204,6 +217,18 @@ const Navbar = () => {
                 <BookOpen className="w-5 h-5" />
                 Writeups
               </Link>
+
+              {/* Admin Link in Mobile Menu - Only show for admins/moderators */}
+              {(isAdmin || isModerator) && (
+                <Link 
+                  to="/admin" 
+                  className="flex items-center gap-3 px-4 py-2 text-foreground/80 hover:text-green-600 hover:bg-accent rounded-lg transition-all"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  <Shield className="w-5 h-5" />
+                  Admin
+                </Link>
+              )}
               
               {/* Conditional Mobile Auth Button */}
               <div className="px-4 pt-2 border-t border-border">
