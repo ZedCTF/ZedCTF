@@ -1,7 +1,7 @@
 // src/components/ChallengeDetail.tsx
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { doc, getDoc, collection, addDoc, query, where, orderBy, getDocs } from "firebase/firestore";
+import { doc, getDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, arrayUnion, increment } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuthContext } from "../contexts/AuthContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -130,6 +130,25 @@ const ChallengeDetail = () => {
     }
   };
 
+  // Check if user has already solved this challenge and received points
+  const hasUserSolvedAndReceivedPoints = async (userId: string, challengeId: string): Promise<boolean> => {
+    try {
+      const submissionsQuery = query(
+        collection(db, "submissions"),
+        where("challengeId", "==", challengeId),
+        where("userId", "==", userId),
+        where("isCorrect", "==", true),
+        where("pointsAwarded", ">", 0)
+      );
+
+      const submissionsSnapshot = await getDocs(submissionsQuery);
+      return !submissionsSnapshot.empty;
+    } catch (error) {
+      console.error("Error checking user solve status:", error);
+      return false;
+    }
+  };
+
   const submitFlag = async () => {
     if (!challenge || !user || !flagInput.trim()) return;
 
@@ -151,6 +170,15 @@ const ChallengeDetail = () => {
         isCorrect = challenge.flag?.trim() === flagInput.trim();
       }
 
+      // Check if user has already solved this challenge and received points
+      const alreadySolvedWithPoints = await hasUserSolvedAndReceivedPoints(user.uid, challenge.id);
+      
+      // Determine points to award (0 if already solved, full points if first time)
+      let pointsToAward = 0;
+      if (isCorrect && !alreadySolvedWithPoints) {
+        pointsToAward = challenge.points || 0;
+      }
+
       // Record submission
       const submissionData = {
         challengeId: challenge.id,
@@ -160,13 +188,33 @@ const ChallengeDetail = () => {
         flag: flagInput,
         isCorrect: isCorrect,
         submittedAt: new Date(),
-        pointsAwarded: isCorrect ? (challenge.points || 0) : 0
+        pointsAwarded: pointsToAward
       };
 
       await addDoc(collection(db, "submissions"), submissionData);
 
       if (isCorrect) {
-        setMessage({ type: 'success', text: 'Congratulations! Flag is correct!' });
+        // Update challenge solvedBy array if not already included
+        if (!challenge.solvedBy?.includes(user.uid)) {
+          await updateDoc(doc(db, "challenges", challenge.id), {
+            solvedBy: arrayUnion(user.uid)
+          });
+        }
+
+        // Update user's total points if this is their first solve
+        if (pointsToAward > 0) {
+          await updateDoc(doc(db, "users", user.uid), {
+            totalPoints: increment(pointsToAward),
+            challengesSolved: arrayUnion(challenge.id)
+          });
+        }
+
+        setMessage({ 
+          type: 'success', 
+          text: pointsToAward > 0 
+            ? `Congratulations! Flag is correct! +${pointsToAward} points awarded!`
+            : 'Congratulations! Flag is correct! (No additional points - already solved)'
+        });
         setFlagInput("");
         
         // Refresh challenge to update solved status
@@ -327,6 +375,9 @@ const ChallengeDetail = () => {
     return content;
   };
 
+  // Calculate if user received points for this solve
+  const userReceivedPoints = submissions.some(sub => sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0);
+
   return (
     <>
       <Navbar />
@@ -346,7 +397,7 @@ const ChallengeDetail = () => {
               {isSolved && (
                 <Badge className="bg-green-500/20 text-green-600 border-green-200">
                   <CheckCircle className="w-3 h-3 mr-1" />
-                  Solved
+                  {userReceivedPoints ? 'Solved + Points' : 'Solved'}
                 </Badge>
               )}
               {challenge.featuredOnPractice && (
@@ -611,7 +662,10 @@ const ChallengeDetail = () => {
                       <CheckCircle className="w-8 h-8 text-green-600 mx-auto mb-1" />
                       <p className="text-green-600 font-semibold text-sm">Challenge Solved!</p>
                       <p className="text-green-600 text-xs mt-1">
-                        +{challenge.totalPoints || challenge.points} points
+                        {userReceivedPoints 
+                          ? `+${challenge.totalPoints || challenge.points} points awarded`
+                          : 'Already solved - no additional points'
+                        }
                       </p>
                     </div>
                   )}
@@ -635,6 +689,11 @@ const ChallengeDetail = () => {
                               <XCircle className="w-3 h-3 text-red-600 flex-shrink-0" />
                             )}
                             <code className="truncate font-mono">{submission.flag}</code>
+                            {submission.pointsAwarded && submission.pointsAwarded > 0 && (
+                              <Badge variant="outline" className="ml-1 text-xs bg-green-500/10 text-green-600">
+                                +{submission.pointsAwarded}
+                              </Badge>
+                            )}
                           </div>
                           <span className="text-muted-foreground flex-shrink-0 ml-1 text-xs">
                             {submission.submittedAt?.toDate?.()?.toLocaleTimeString() || 

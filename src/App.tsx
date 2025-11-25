@@ -126,7 +126,7 @@ function App() {
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </main>
-              <Footer />
+              <Footer /> {/* Only one Footer here */}
             </div>
           </Router>
         </AuthInitializer>
