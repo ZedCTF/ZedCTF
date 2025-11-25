@@ -69,9 +69,6 @@ const ChallengeDetail = () => {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [activeTab, setActiveTab] = useState("description");
 
-  // Base URL for navigation
-  const baseUrl = "/ZedCTF";
-
   useEffect(() => {
     if (challengeId) {
       fetchChallenge();
@@ -82,6 +79,8 @@ const ChallengeDetail = () => {
   const fetchChallenge = async () => {
     try {
       setLoading(true);
+      console.log("🔄 Fetching challenge:", challengeId);
+      
       const challengeDoc = await getDoc(doc(db, "challenges", challengeId!));
       
       if (challengeDoc.exists()) {
@@ -89,6 +88,7 @@ const ChallengeDetail = () => {
           id: challengeDoc.id,
           ...challengeDoc.data()
         } as Challenge;
+        console.log("✅ Challenge found:", challengeData);
         setChallenge(challengeData);
         
         // Initialize hints visibility
@@ -96,10 +96,11 @@ const ChallengeDetail = () => {
           setShowHints(new Array(challengeData.hints.length).fill(false));
         }
       } else {
+        console.log("❌ Challenge not found in Firestore");
         setMessage({ type: 'error', text: 'Challenge not found' });
       }
     } catch (error) {
-      console.error("Error fetching challenge:", error);
+      console.error("💥 Error fetching challenge:", error);
       setMessage({ type: 'error', text: 'Failed to load challenge' });
     } finally {
       setLoading(false);
@@ -189,7 +190,7 @@ const ChallengeDetail = () => {
   };
 
   const navigateToPractice = () => {
-    navigate(`${baseUrl}/practice`);
+    navigate("/practice");
   };
 
   const copyToClipboard = (text: string) => {
@@ -227,7 +228,7 @@ const ChallengeDetail = () => {
                 <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
                 <h2 className="text-lg font-bold mb-2">Challenge Not Found</h2>
                 <p className="text-muted-foreground text-sm mb-4">
-                  The challenge you're looking for doesn't exist.
+                  The challenge you're looking for doesn't exist or you don't have permission to view it.
                 </p>
                 <Button onClick={navigateToPractice} variant="terminal" size="sm">
                   <ArrowLeft className="w-3 h-3 mr-1" />

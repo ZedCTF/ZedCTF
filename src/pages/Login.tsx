@@ -25,14 +25,35 @@ const Login = () => {
   githubProvider.addScope('read:user');
   githubProvider.addScope('user:email');
 
+  // Function to determine redirect path based on user role
+  const getRedirectPath = async (userId: string) => {
+    try {
+      const userDoc = await getDoc(doc(db, "users", userId));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        // Redirect admins and moderators to admin panel
+        if (userData.role === 'admin' || userData.role === 'moderator') {
+          return "/admin";
+        }
+      }
+      // Regular users go to dashboard
+      return "/dashboard";
+    } catch (error) {
+      console.error("Error checking user role:", error);
+      // Default to dashboard if there's an error
+      return "/dashboard";
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setIsLoading(true);
 
     try {
-      await signInWithEmailAndPassword(auth, formData.email, formData.password);
-      navigate("/dashboard");
+      const result = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+      const redirectPath = await getRedirectPath(result.user.uid);
+      navigate(redirectPath);
     } catch (error: any) {
       console.error("Login error:", error);
       setError(getFirebaseErrorMessage(error.code));
@@ -63,6 +84,8 @@ const Login = () => {
           displayName: user.displayName || 'GitHub User',
           photoURL: user.photoURL,
           provider: 'github',
+          role: 'user', // Default role for new users
+          isActive: true,
           createdAt: new Date(),
           updatedAt: new Date(),
           totalPoints: 0,
@@ -70,9 +93,14 @@ const Login = () => {
           currentRank: 0,
           timeSpent: "0h 0m"
         });
+        
+        // New users go to dashboard
+        navigate("/dashboard");
+      } else {
+        // Existing users - check their role for redirect
+        const redirectPath = await getRedirectPath(user.uid);
+        navigate(redirectPath);
       }
-
-      navigate("/dashboard");
 
     } catch (error: any) {
       console.error("GitHub login error:", error);
@@ -220,7 +248,7 @@ const Login = () => {
                 ) : (
                   <LogIn className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 )}
-                {isLoading ? 'Signing in...' : 'Access Dashboard'}
+                {isLoading ? 'Signing in...' : 'Sign In'}
               </button>
             </form>
 

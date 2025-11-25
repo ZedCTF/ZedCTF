@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { collection, getDocs, query, where, orderBy } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuthContext } from "../contexts/AuthContext";
+import { useNavigate } from "react-router-dom"; // Add this import
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +52,7 @@ interface Category {
 
 const Practice = () => {
   const { user } = useAuthContext();
+  const navigate = useNavigate(); // Add this
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [filteredChallenges, setFilteredChallenges] = useState<Challenge[]>([]);
@@ -58,9 +60,6 @@ const Practice = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [error, setError] = useState("");
-
-  // Base URL for navigation
-  const baseUrl = "/ZedCTF";
 
   useEffect(() => {
     fetchPracticeChallenges();
@@ -205,12 +204,13 @@ const Practice = () => {
     }
   };
 
+  // FIXED: Use navigate instead of window.location.href
   const navigateToChallenge = (challengeId: string) => {
-    window.location.href = `${baseUrl}/challenge/${challengeId}`;
+    navigate(`/challenge/${challengeId}`);
   };
 
   const navigateToLiveEvents = () => {
-    window.location.href = `${baseUrl}/live-events`;
+    navigate("/live");
   };
 
   const refreshChallenges = () => {
@@ -245,14 +245,14 @@ const Practice = () => {
       <div className="min-h-screen bg-background pt-16">
         <div className="container mx-auto px-4 py-8">
           {/* Header */}
-          <div className="text-center mb-8">
+          <div className="text-center mb-12">
             <div className="flex justify-center mb-4">
-              <Shield className="w-12 h-12 text-primary" />
+              <Shield className="w-16 h-16 text-primary" />
             </div>
-            <h1 className="text-3xl font-bold mb-3 bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+            <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
               Practice Challenges
             </h1>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto mb-6">
+            <p className="text-xl text-muted-foreground max-w-2xl mx-auto mb-6">
               Master your cybersecurity skills with hands-on challenges across different categories
             </p>
             
@@ -268,44 +268,44 @@ const Practice = () => {
               </Card>
             )}
 
-            {/* Compact Stats */}
-            <div className="grid grid-cols-3 gap-3 max-w-md mx-auto mb-6">
-              <Card className="text-center border">
-                <CardContent className="p-3">
-                  <div className="text-lg font-bold text-primary">{challenges.length}</div>
-                  <div className="text-xs text-muted-foreground">Challenges</div>
+            {/* Stats */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 max-w-2xl mx-auto mb-8">
+              <Card className="text-center border-2">
+                <CardContent className="p-4">
+                  <div className="text-2xl font-bold text-primary">{challenges.length}</div>
+                  <div className="text-sm text-muted-foreground">Total Challenges</div>
                 </CardContent>
               </Card>
-              <Card className="text-center border">
-                <CardContent className="p-3">
-                  <div className="text-lg font-bold text-green-600">
+              <Card className="text-center border-2">
+                <CardContent className="p-4">
+                  <div className="text-2xl font-bold text-green-600">
                     {challenges.reduce((sum, challenge) => sum + (challenge.solvedBy?.length || 0), 0)}
                   </div>
-                  <div className="text-xs text-muted-foreground">Solves</div>
+                  <div className="text-sm text-muted-foreground">Total Solves</div>
                 </CardContent>
               </Card>
-              <Card className="text-center border">
-                <CardContent className="p-3">
-                  <div className="text-lg font-bold text-blue-600">{categories.length}</div>
-                  <div className="text-xs text-muted-foreground">Categories</div>
+              <Card className="text-center border-2">
+                <CardContent className="p-4">
+                  <div className="text-2xl font-bold text-blue-600">{categories.length}</div>
+                  <div className="text-sm text-muted-foreground">Categories</div>
                 </CardContent>
               </Card>
             </div>
 
             {/* Live Events CTA */}
-            <Card className="max-w-4xl mx-auto mb-6 border bg-gradient-to-r from-primary/5 to-primary/10">
-              <CardContent className="p-4">
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <Zap className="w-6 h-6 text-primary" />
-                    <div className="text-left">
-                      <h3 className="font-bold text-sm">Ready for Live Competition?</h3>
-                      <p className="text-muted-foreground text-xs">Test your skills in real-time events!</p>
+            <Card className="max-w-4xl mx-auto mb-8 border-2 bg-gradient-to-r from-primary/5 to-primary/10">
+              <CardContent className="p-6">
+                <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <Zap className="w-8 h-8 text-primary" />
+                    <div>
+                      <h3 className="font-bold text-lg">Ready for Live Competition?</h3>
+                      <p className="text-muted-foreground">Test your skills against other players in real-time events!</p>
                     </div>
                   </div>
-                  <Button variant="terminal" onClick={navigateToLiveEvents} size="sm">
-                    <Zap className="w-3 h-3 mr-1" />
-                    Live Events
+                  <Button variant="terminal" onClick={navigateToLiveEvents}>
+                    <Zap className="w-4 h-4 mr-2" />
+                    View Live Events
                   </Button>
                 </div>
               </CardContent>
@@ -313,66 +313,61 @@ const Practice = () => {
           </div>
 
           {/* Search Bar */}
-          <div className="max-w-2xl mx-auto mb-6">
+          <div className="max-w-2xl mx-auto mb-8">
             <div className="relative">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Search className="absolute left-3 top-3 h-5 w-5 text-muted-foreground" />
               <Input
-                placeholder="Search challenges..."
+                placeholder="Search challenges by title or description..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 h-10 text-sm border"
+                className="pl-12 h-12 text-lg border-2"
               />
             </div>
           </div>
 
           {/* Category Selection */}
           {!selectedCategory && (
-            <div className="mb-8">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold">Categories</h2>
+            <div className="mb-12">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold">Choose a Category</h2>
                 <Button variant="outline" onClick={refreshChallenges} size="sm">
-                  <RefreshCw className="w-3 h-3 mr-1" />
+                  <RefreshCw className="w-4 h-4 mr-2" />
                   Refresh
                 </Button>
               </div>
 
               {categories.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {categories.map((category) => (
                     <Card 
                       key={category.name}
-                      className="border hover:border-primary/50 hover:shadow-md transition-all cursor-pointer group"
+                      className="border-2 hover:border-primary/50 hover:shadow-lg transition-all cursor-pointer group"
                       onClick={() => setSelectedCategory(category.name)}
                     >
-                      <CardContent className="p-4">
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className={`text-xl bg-gradient-to-r ${category.color} rounded-lg p-2`}>
+                      <CardContent className="p-6">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className={`text-2xl bg-gradient-to-r ${category.color} rounded-lg p-3`}>
                             {category.icon}
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-bold text-base group-hover:text-primary transition-colors truncate">
-                              {category.name}
-                            </h3>
-                            <p className="text-xs text-muted-foreground">
-                              {category.count} challenge{category.count !== 1 ? 's' : ''}
-                            </p>
-                          </div>
-                          <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
+                          <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
                         </div>
-                        <p className="text-xs text-muted-foreground line-clamp-2">
-                          {category.description}
+                        <h3 className="font-bold text-lg mb-2 group-hover:text-primary transition-colors">
+                          {category.name}
+                        </h3>
+                        <p className="text-muted-foreground">
+                          {category.count} challenge{category.count !== 1 ? 's' : ''}
                         </p>
                       </CardContent>
                     </Card>
                   ))}
                 </div>
               ) : (
-                <Card className="text-center border">
-                  <CardContent className="p-8">
-                    <FolderOpen className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
-                    <h3 className="text-lg font-bold mb-1">No Categories Available</h3>
-                    <p className="text-muted-foreground text-sm">
-                      No practice challenges available. Check back later!
+                <Card className="text-center border-2">
+                  <CardContent className="p-12">
+                    <FolderOpen className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-50" />
+                    <h3 className="text-xl font-bold mb-2">No Categories Available</h3>
+                    <p className="text-muted-foreground">
+                      No practice challenges are currently available. Check back later!
                     </p>
                   </CardContent>
                 </Card>
@@ -382,70 +377,69 @@ const Practice = () => {
 
           {/* Challenges in Selected Category */}
           {selectedCategory && (
-            <div className="mb-8">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
+            <div className="mb-12">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-4">
                   <Button 
                     variant="outline" 
                     onClick={() => setSelectedCategory(null)}
-                    className="flex items-center gap-1"
-                    size="sm"
+                    className="flex items-center gap-2"
                   >
-                    <ChevronRight className="w-3 h-3 rotate-180" />
-                    Back
+                    <ChevronRight className="w-4 h-4 rotate-180" />
+                    Back to Categories
                   </Button>
                   <div>
-                    <h2 className="text-xl font-bold">{selectedCategory}</h2>
-                    <p className="text-muted-foreground text-sm">
-                      {filteredChallenges.length} challenge{filteredChallenges.length !== 1 ? 's' : ''}
+                    <h2 className="text-2xl font-bold">{selectedCategory} Challenges</h2>
+                    <p className="text-muted-foreground">
+                      {filteredChallenges.length} challenge{filteredChallenges.length !== 1 ? 's' : ''} available
                     </p>
                   </div>
                 </div>
                 <div className="flex gap-2">
                   <Button variant="outline" onClick={clearFilters} size="sm">
-                    Clear
+                    Clear Filters
                   </Button>
                   <Button variant="outline" onClick={refreshChallenges} size="sm">
-                    <RefreshCw className="w-3 h-3 mr-1" />
+                    <RefreshCw className="w-4 h-4 mr-2" />
                     Refresh
                   </Button>
                 </div>
               </div>
 
               {filteredChallenges.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {filteredChallenges.map((challenge) => (
                     <Card 
                       key={challenge.id}
-                      className="border hover:border-primary/50 hover:shadow-md transition-all cursor-pointer group"
-                      onClick={() => navigateToChallenge(challenge.id)}
+                      className="border-2 hover:border-primary/50 hover:shadow-lg transition-all cursor-pointer group"
+                      onClick={() => navigateToChallenge(challenge.id)} // FIXED: Using navigate
                     >
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between mb-2">
-                          <h3 className="font-bold text-sm group-hover:text-primary transition-colors line-clamp-2 flex-1 mr-2">
+                      <CardContent className="p-6">
+                        <div className="flex items-start justify-between mb-3">
+                          <h3 className="font-bold text-lg group-hover:text-primary transition-colors">
                             {challenge.title}
                           </h3>
-                          <Badge className={`${getDifficultyColor(challenge.difficulty)} text-xs`}>
+                          <Badge className={getDifficultyColor(challenge.difficulty)}>
                             {getDifficultyText(challenge.difficulty)}
                           </Badge>
                         </div>
                         
-                        <p className="text-muted-foreground text-xs mb-3 line-clamp-2">
+                        <p className="text-muted-foreground mb-4 line-clamp-2">
                           {challenge.description}
                         </p>
 
-                        <div className="flex items-center justify-between text-xs">
-                          <div className="flex items-center gap-3">
+                        <div className="flex items-center justify-between text-sm">
+                          <div className="flex items-center gap-4">
                             <div className="flex items-center gap-1">
-                              <Users className="w-3 h-3" />
+                              <Users className="w-4 h-4" />
                               <span>{challenge.solvedBy?.length || 0}</span>
                             </div>
-                            <Badge variant="outline" className="font-mono font-bold text-xs">
+                            <Badge variant="outline" className="font-mono font-bold">
                               {challenge.totalPoints || challenge.points} pts
                             </Badge>
                           </div>
                           {challenge.createdAt && (
-                            <div className="text-muted-foreground text-xs">
+                            <div className="text-muted-foreground">
                               {challenge.createdAt?.toDate?.()?.toLocaleDateString() || 
                                new Date(challenge.createdAt).toLocaleDateString()}
                             </div>
@@ -456,17 +450,17 @@ const Practice = () => {
                   ))}
                 </div>
               ) : (
-                <Card className="text-center border">
-                  <CardContent className="p-8">
-                    <Search className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
-                    <h3 className="text-lg font-bold mb-1">No Challenges Found</h3>
-                    <p className="text-muted-foreground text-sm mb-3">
+                <Card className="text-center border-2">
+                  <CardContent className="p-12">
+                    <Search className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-50" />
+                    <h3 className="text-xl font-bold mb-2">No Challenges Found</h3>
+                    <p className="text-muted-foreground mb-4">
                       {searchTerm 
                         ? `No challenges match "${searchTerm}" in ${selectedCategory}`
                         : `No challenges available in ${selectedCategory}`
                       }
                     </p>
-                    <Button variant="outline" onClick={clearFilters} size="sm">
+                    <Button variant="outline" onClick={clearFilters}>
                       Clear Search
                     </Button>
                   </CardContent>
@@ -477,21 +471,21 @@ const Practice = () => {
 
           {/* Empty State - No challenges at all */}
           {challenges.length === 0 && !loading && !selectedCategory && (
-            <Card className="text-center border">
-              <CardContent className="p-8">
-                <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
-                <h3 className="text-lg font-bold mb-1">No Practice Challenges Available</h3>
-                <p className="text-muted-foreground text-sm mb-4">
-                  Check back later for new practice challenges.
+            <Card className="text-center border-2">
+              <CardContent className="p-12">
+                <Shield className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-50" />
+                <h3 className="text-xl font-bold mb-2">No Practice Challenges Available</h3>
+                <p className="text-muted-foreground mb-6">
+                  Check back later for new practice challenges, or join a live event to test your skills.
                 </p>
-                <div className="flex gap-3 justify-center">
-                  <Button variant="terminal" onClick={refreshChallenges} size="sm">
-                    <RefreshCw className="w-3 h-3 mr-1" />
+                <div className="flex gap-4 justify-center">
+                  <Button variant="terminal" onClick={refreshChallenges}>
+                    <RefreshCw className="w-4 h-4 mr-2" />
                     Refresh
                   </Button>
-                  <Button variant="outline" onClick={navigateToLiveEvents} size="sm">
-                    <Zap className="w-3 h-3 mr-1" />
-                    Live Events
+                  <Button variant="outline" onClick={navigateToLiveEvents}>
+                    <Zap className="w-4 h-4 mr-2" />
+                    View Live Events
                   </Button>
                 </div>
               </CardContent>

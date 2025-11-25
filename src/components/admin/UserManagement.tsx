@@ -1,6 +1,6 @@
 // src/components/admin/UserManagement.tsx
 import { useState, useEffect } from "react";
-import { collection, getDocs, updateDoc, doc, query, where } from "firebase/firestore";
+import { collection, getDocs, updateDoc, doc } from "firebase/firestore";
 import { db } from "../../firebase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,18 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Search, UserPlus, Shield, Users, Clock, CheckCircle, XCircle, Mail, Crown } from "lucide-react";
+import { 
+  Search, 
+  Shield, 
+  Users, 
+  CheckCircle, 
+  XCircle, 
+  Crown, 
+  GraduationCap,
+  User,
+  Play,
+  Pause
+} from "lucide-react";
 
 interface UserManagementProps {
   onBack: () => void;
@@ -24,6 +35,11 @@ interface User {
   requestedHostRole?: boolean;
   hostRequestReason?: string;
   hostRequestDate?: any;
+  firstName?: string;
+  lastName?: string;
+  institution?: string;
+  bio?: string;
+  challengesSolved?: number;
 }
 
 const UserManagement = ({ onBack }: UserManagementProps) => {
@@ -51,6 +67,8 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
         ...doc.data()
       })) as User[];
 
+      console.log("📊 Fetched users:", usersData);
+      
       setUsers(usersData);
       
       // Get pending host requests
@@ -72,6 +90,8 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
       filtered = filtered.filter(user => user.role === "admin");
     } else if (activeTab === "moderators") {
       filtered = filtered.filter(user => user.role === "moderator");
+    } else if (activeTab === "students") {
+      filtered = filtered.filter(user => user.role === "student");
     } else if (activeTab === "pending") {
       filtered = filtered.filter(user => user.requestedHostRole === true);
     } else if (activeTab === "active") {
@@ -85,7 +105,9 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
       filtered = filtered.filter(user =>
         user.displayName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.role?.toLowerCase().includes(searchTerm.toLowerCase())
+        user.role?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.lastName?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
@@ -94,6 +116,8 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
 
   const updateUserRole = async (userId: string, newRole: string) => {
     try {
+      console.log("🔄 Attempting to update user role:", { userId, newRole });
+      
       const updateData: any = { role: newRole };
       
       // If approving host request or making admin, clear the request
@@ -102,6 +126,7 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
         updateData.hostRequestReason = null;
       }
 
+      // Update in Firestore
       await updateDoc(doc(db, "users", userId), updateData);
       
       // Update local state
@@ -109,23 +134,28 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
         user.id === userId ? { ...user, ...updateData } : user
       ));
 
+      console.log("✅ User role updated successfully");
       setMessage({ type: 'success', text: `User role updated to ${newRole}` });
       setTimeout(() => setMessage(null), 3000);
-    } catch (error) {
-      console.error("Error updating user role:", error);
-      setMessage({ type: 'error', text: 'Failed to update user role' });
+    } catch (error: any) {
+      console.error("❌ Error updating user role:", error);
+      console.error("Error code:", error.code);
+      console.error("Error message:", error.message);
+      setMessage({ type: 'error', text: `Failed to update user role: ${error.message}` });
     }
   };
 
   const handleHostRequest = async (userId: string, approved: boolean) => {
     try {
-      const updateData = {
+      console.log("🔄 Handling host request:", { userId, approved });
+      
+      const updateData: any = {
         requestedHostRole: false,
         hostRequestReason: null
       };
 
       if (approved) {
-        updateData.role = "moderator"; // Give moderator privileges for hosting
+        updateData.role = "moderator";
       }
 
       await updateDoc(doc(db, "users", userId), updateData);
@@ -138,29 +168,37 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
       const action = approved ? "approved" : "rejected";
       setMessage({ type: 'success', text: `Host request ${action}` });
       setTimeout(() => setMessage(null), 3000);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error handling host request:", error);
-      setMessage({ type: 'error', text: 'Failed to process host request' });
+      setMessage({ type: 'error', text: `Failed to process host request: ${error.message}` });
     }
   };
 
   const toggleUserStatus = async (userId: string, currentStatus: boolean) => {
     try {
+      console.log("🔄 Toggling user status:", { userId, currentStatus });
+      
+      const newStatus = !currentStatus;
+      
+      // Update in Firestore
       await updateDoc(doc(db, "users", userId), {
-        isActive: !currentStatus
+        isActive: newStatus
       });
       
       // Update local state
       setUsers(users.map(user => 
-        user.id === userId ? { ...user, isActive: !currentStatus } : user
+        user.id === userId ? { ...user, isActive: newStatus } : user
       ));
 
-      const action = !currentStatus ? "activated" : "suspended";
+      const action = newStatus ? "activated" : "suspended";
+      console.log("✅ User status updated successfully:", action);
       setMessage({ type: 'success', text: `User ${action}` });
       setTimeout(() => setMessage(null), 3000);
-    } catch (error) {
-      console.error("Error updating user status:", error);
-      setMessage({ type: 'error', text: 'Failed to update user status' });
+    } catch (error: any) {
+      console.error("❌ Error updating user status:", error);
+      console.error("Error code:", error.code);
+      console.error("Error message:", error.message);
+      setMessage({ type: 'error', text: `Failed to update user status: ${error.message}` });
     }
   };
 
@@ -168,20 +206,30 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
     switch (role) {
       case "admin": return "destructive";
       case "moderator": return "default";
-      default: return "secondary";
+      case "student": return "secondary";
+      default: return "outline";
     }
   };
 
-  const getStatusBadgeVariant = (user: User) => {
-    if (user.requestedHostRole) return "default";
-    if (user.isActive === false) return "secondary";
-    return "default";
+  const getRoleIcon = (role: string) => {
+    switch (role) {
+      case "admin": return <Crown className="w-3 h-3" />;
+      case "moderator": return <Shield className="w-3 h-3" />;
+      case "student": return <GraduationCap className="w-3 h-3" />;
+      default: return <User className="w-3 h-3" />;
+    }
   };
 
   const getStatusText = (user: User) => {
     if (user.requestedHostRole) return "Pending Host";
     if (user.isActive === false) return "Suspended";
     return "Active";
+  };
+
+  const getStatusBadgeVariant = (user: User) => {
+    if (user.requestedHostRole) return "default";
+    if (user.isActive === false) return "destructive";
+    return "default";
   };
 
   if (loading) {
@@ -230,7 +278,7 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
       )}
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
         <Card>
           <CardContent className="p-4 text-center">
             <div className="text-2xl font-bold text-primary">{users.length}</div>
@@ -239,7 +287,7 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-blue-600">
+            <div className="text-2xl font-bold text-red-600">
               {users.filter(u => u.role === "admin").length}
             </div>
             <div className="text-xs text-muted-foreground">Admins</div>
@@ -247,10 +295,18 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-green-600">
+            <div className="text-2xl font-bold text-blue-600">
               {users.filter(u => u.role === "moderator").length}
             </div>
             <div className="text-xs text-muted-foreground">Moderators</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <div className="text-2xl font-bold text-green-600">
+              {users.filter(u => u.role === "student").length}
+            </div>
+            <div className="text-xs text-muted-foreground">Students</div>
           </CardContent>
         </Card>
         <Card>
@@ -263,7 +319,7 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-red-600">
+            <div className="text-2xl font-bold text-gray-600">
               {users.filter(u => u.isActive === false).length}
             </div>
             <div className="text-xs text-muted-foreground">Suspended</div>
@@ -276,10 +332,10 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
           <TabsTrigger value="all" className="text-xs">All Users</TabsTrigger>
           <TabsTrigger value="admins" className="text-xs">Admins</TabsTrigger>
           <TabsTrigger value="moderators" className="text-xs">Moderators</TabsTrigger>
+          <TabsTrigger value="students" className="text-xs">Students</TabsTrigger>
           <TabsTrigger value="pending" className="text-xs">
-            Pending Hosts {pendingHostRequests.length > 0 && `(${pendingHostRequests.length})`}
+            Pending {pendingHostRequests.length > 0 && `(${pendingHostRequests.length})`}
           </TabsTrigger>
-          <TabsTrigger value="active" className="text-xs">Active</TabsTrigger>
           <TabsTrigger value="suspended" className="text-xs">Suspended</TabsTrigger>
         </TabsList>
 
@@ -292,8 +348,8 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
                     {activeTab === "all" && "All Users"}
                     {activeTab === "admins" && "Administrators"}
                     {activeTab === "moderators" && "Moderators"}
+                    {activeTab === "students" && "Students"}
                     {activeTab === "pending" && "Pending Host Requests"}
-                    {activeTab === "active" && "Active Users"}
                     {activeTab === "suspended" && "Suspended Users"}
                   </CardTitle>
                   <CardDescription>
@@ -318,14 +374,8 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
                 {filteredUsers.map((user) => (
                   <div key={user.id} className="flex items-center justify-between p-4 border rounded-lg">
                     <div className="flex items-center space-x-4 flex-1">
-                      <div className="flex-shrink-0 w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
-                        {user.role === "admin" ? (
-                          <Crown className="w-5 h-5 text-primary" />
-                        ) : (
-                          <span className="font-medium text-sm">
-                            {user.displayName?.charAt(0).toUpperCase() || user.email?.charAt(0).toUpperCase()}
-                          </span>
-                        )}
+                      <div className="flex-shrink-0 w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
+                        {getRoleIcon(user.role)}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
@@ -333,6 +383,9 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
                           {user.role === "admin" && <Crown className="w-4 h-4 text-yellow-600" />}
                         </div>
                         <p className="text-sm text-muted-foreground truncate">{user.email}</p>
+                        {user.institution && (
+                          <p className="text-xs text-muted-foreground truncate">{user.institution}</p>
+                        )}
                         
                         {/* Host request reason */}
                         {user.requestedHostRole && user.hostRequestReason && (
@@ -342,7 +395,8 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
                         )}
                       </div>
                       <div className="flex items-center space-x-2 flex-shrink-0">
-                        <Badge variant={getRoleBadgeVariant(user.role)}>
+                        <Badge variant={getRoleBadgeVariant(user.role)} className="flex items-center gap-1">
+                          {getRoleIcon(user.role)}
                           {user.role}
                         </Badge>
                         <Badge variant={getStatusBadgeVariant(user)}>
@@ -356,9 +410,9 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
                       <select 
                         value={user.role} 
                         onChange={(e) => updateUserRole(user.id, e.target.value)}
-                        className="p-2 border rounded text-sm"
+                        className="p-2 border rounded text-sm bg-background"
                       >
-                        <option value="user">User</option>
+                        <option value="student">Student</option>
                         <option value="moderator">Moderator</option>
                         <option value="admin">Admin</option>
                       </select>
@@ -370,7 +424,7 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
                             variant="outline"
                             size="sm"
                             onClick={() => handleHostRequest(user.id, true)}
-                            className="text-green-600 border-green-200 hover:bg-green-50"
+                            className="h-9 w-9 p-0 text-green-600 border-green-200"
                           >
                             <CheckCircle className="w-4 h-4" />
                           </Button>
@@ -378,7 +432,7 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
                             variant="outline"
                             size="sm"
                             onClick={() => handleHostRequest(user.id, false)}
-                            className="text-red-600 border-red-200 hover:bg-red-50"
+                            className="h-9 w-9 p-0 text-red-600 border-red-200"
                           >
                             <XCircle className="w-4 h-4" />
                           </Button>
@@ -390,10 +444,24 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => toggleUserStatus(user.id, user.isActive || true)}
-                          className={user.isActive === false ? "text-green-600" : "text-red-600"}
+                          onClick={() => toggleUserStatus(user.id, user.isActive ?? true)}
+                          className={`flex items-center gap-1 ${
+                            user.isActive === false 
+                              ? "text-green-600 border-green-200 hover:bg-green-50" 
+                              : "text-red-600 border-red-200 hover:bg-red-50"
+                          }`}
                         >
-                          {user.isActive === false ? "Activate" : "Suspend"}
+                          {user.isActive === false ? (
+                            <>
+                              <Play className="w-3 h-3" />
+                              Activate
+                            </>
+                          ) : (
+                            <>
+                              <Pause className="w-3 h-3" />
+                              Suspend
+                            </>
+                          )}
                         </Button>
                       )}
                     </div>
