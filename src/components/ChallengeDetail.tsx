@@ -11,9 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Shield, ArrowLeft, Flag, Users, Clock, Star, FileText, Link, Eye, EyeOff, CheckCircle, XCircle, Copy } from "lucide-react";
-import Navbar from "./Navbar"; // Add this import
-import Footer from "./Footer"; // Add this import
+import { Shield, ArrowLeft, Flag, Users, Clock, Star, FileText, Link, Eye, EyeOff, CheckCircle, XCircle, Copy, ExternalLink, Lightbulb } from "lucide-react";
+import Navbar from "./Navbar";
+import Footer from "./Footer";
 
 interface Challenge {
   id: string;
@@ -68,6 +68,9 @@ const ChallengeDetail = () => {
   const [showHints, setShowHints] = useState<boolean[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [activeTab, setActiveTab] = useState("description");
+
+  // Base URL for navigation
+  const baseUrl = "/ZedCTF";
 
   useEffect(() => {
     if (challengeId) {
@@ -186,7 +189,7 @@ const ChallengeDetail = () => {
   };
 
   const navigateToPractice = () => {
-    navigate('/practice');
+    navigate(`${baseUrl}/practice`);
   };
 
   const copyToClipboard = (text: string) => {
@@ -201,10 +204,10 @@ const ChallengeDetail = () => {
       <>
         <Navbar />
         <div className="min-h-screen bg-background pt-16">
-          <div className="container mx-auto px-4 py-8">
-            <div className="text-center py-12">
-              <div className="animate-spin w-16 h-16 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
-              <p className="mt-4 text-muted-foreground">Loading challenge...</p>
+          <div className="container mx-auto px-4 py-6">
+            <div className="text-center py-8">
+              <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto"></div>
+              <p className="mt-2 text-sm text-muted-foreground">Loading challenge...</p>
             </div>
           </div>
         </div>
@@ -218,16 +221,16 @@ const ChallengeDetail = () => {
       <>
         <Navbar />
         <div className="min-h-screen bg-background pt-16">
-          <div className="container mx-auto px-4 py-8">
-            <Card>
-              <CardContent className="p-12 text-center">
-                <Shield className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-50" />
-                <h3 className="text-xl font-bold mb-2">Challenge Not Found</h3>
-                <p className="text-muted-foreground mb-6">
-                  The challenge you're looking for doesn't exist or you don't have permission to view it.
+          <div className="container mx-auto px-4 py-6">
+            <Card className="max-w-md mx-auto border">
+              <CardContent className="p-6 text-center">
+                <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
+                <h2 className="text-lg font-bold mb-2">Challenge Not Found</h2>
+                <p className="text-muted-foreground text-sm mb-4">
+                  The challenge you're looking for doesn't exist.
                 </p>
-                <Button onClick={navigateToPractice}>
-                  <ArrowLeft className="w-4 h-4 mr-2" />
+                <Button onClick={navigateToPractice} variant="terminal" size="sm">
+                  <ArrowLeft className="w-3 h-3 mr-1" />
                   Back to Practice
                 </Button>
               </CardContent>
@@ -241,24 +244,24 @@ const ChallengeDetail = () => {
 
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
-      case "easy": return "bg-green-100 text-green-800 border-green-200";
-      case "medium": return "bg-yellow-100 text-yellow-800 border-yellow-200";
-      case "hard": return "bg-red-100 text-red-800 border-red-200";
-      case "expert": return "bg-purple-100 text-purple-800 border-purple-200";
-      default: return "bg-gray-100 text-gray-800 border-gray-200";
+      case "easy": return "bg-green-500/20 text-green-600 border-green-200";
+      case "medium": return "bg-yellow-500/20 text-yellow-600 border-yellow-200";
+      case "hard": return "bg-red-500/20 text-red-600 border-red-200";
+      case "expert": return "bg-purple-500/20 text-purple-600 border-purple-200";
+      default: return "bg-gray-500/20 text-gray-600 border-gray-200";
     }
   };
 
   const getCategoryColor = (category: string) => {
     const colors: { [key: string]: string } = {
-      web: "bg-blue-100 text-blue-800 border-blue-200",
-      crypto: "bg-purple-100 text-purple-800 border-purple-200",
-      forensics: "bg-orange-100 text-orange-800 border-orange-200",
-      pwn: "bg-red-100 text-red-800 border-red-200",
-      reversing: "bg-indigo-100 text-indigo-800 border-indigo-200",
-      misc: "bg-gray-100 text-gray-800 border-gray-200"
+      web: "bg-blue-500/20 text-blue-600 border-blue-200",
+      crypto: "bg-purple-500/20 text-purple-600 border-purple-200",
+      forensics: "bg-orange-500/20 text-orange-600 border-orange-200",
+      pwn: "bg-red-500/20 text-red-600 border-red-200",
+      reversing: "bg-indigo-500/20 text-indigo-600 border-indigo-200",
+      misc: "bg-gray-500/20 text-gray-600 border-gray-200"
     };
-    return colors[category] || "bg-gray-100 text-gray-800 border-gray-200";
+    return colors[category] || "bg-gray-500/20 text-gray-600 border-gray-200";
   };
 
   // Function to render challenge content with proper formatting
@@ -277,19 +280,19 @@ const ChallengeDetail = () => {
         const value = valueParts.join('=').trim();
         
         content.push(
-          <div key={i} className="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-            <div className="flex items-center justify-between mb-2">
-              <span className="font-mono font-semibold text-sm">{key}=</span>
+          <div key={i} className="mb-3 p-3 bg-muted/30 border rounded-lg">
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-mono font-semibold text-xs">{key}=</span>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => copyToClipboard(value)}
-                className="h-8 px-2"
+                className="h-6 px-2"
               >
                 <Copy className="w-3 h-3" />
               </Button>
             </div>
-            <div className="font-mono text-sm bg-white p-3 rounded border break-all">
+            <div className="font-mono text-xs bg-background p-2 rounded border break-all">
               {value}
             </div>
           </div>
@@ -300,9 +303,9 @@ const ChallengeDetail = () => {
         const value = valueParts.join('=').trim();
         
         content.push(
-          <div key={i} className="mb-3">
-            <strong>{key}=</strong>
-            <div className="font-mono text-sm bg-gray-50 p-2 rounded border break-all mt-1">
+          <div key={i} className="mb-2">
+            <strong className="text-sm">{key}=</strong>
+            <div className="font-mono text-xs bg-muted/30 p-2 rounded border break-all mt-1">
               {value}
             </div>
           </div>
@@ -310,13 +313,13 @@ const ChallengeDetail = () => {
       } else if (line) {
         // Regular text
         content.push(
-          <p key={i} className="mb-3 leading-relaxed">
+          <p key={i} className="mb-2 text-sm leading-relaxed">
             {line}
           </p>
         );
       } else {
         // Empty line (paragraph break)
-        content.push(<div key={i} className="mb-3" />);
+        content.push(<div key={i} className="mb-2" />);
       }
     }
 
@@ -327,23 +330,26 @@ const ChallengeDetail = () => {
     <>
       <Navbar />
       <div className="min-h-screen bg-background pt-16">
-        <div className="container mx-auto px-4 py-8">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <Button variant="outline" onClick={navigateToPractice}>
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Practice
-            </Button>
+        <div className="container mx-auto px-4 py-6">
+          {/* Header - Only show challenge name */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <Button variant="ghost" onClick={navigateToPractice} size="sm" className="-ml-3">
+                <ArrowLeft className="w-3 h-3 mr-1" />
+                Back to Practice
+              </Button>
+              <h1 className="text-xl font-bold">{challenge.title}</h1>
+            </div>
             
             <div className="flex items-center gap-2">
               {isSolved && (
-                <Badge className="bg-green-100 text-green-800 border-green-200">
+                <Badge className="bg-green-500/20 text-green-600 border-green-200">
                   <CheckCircle className="w-3 h-3 mr-1" />
                   Solved
                 </Badge>
               )}
               {challenge.featuredOnPractice && (
-                <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">
+                <Badge className="bg-yellow-500/20 text-yellow-600 border-yellow-200">
                   <Star className="w-3 h-3 mr-1" />
                   Featured
                 </Badge>
@@ -351,79 +357,82 @@ const ChallengeDetail = () => {
             </div>
           </div>
 
-          {/* Challenge Header */}
-          <Card className="mb-6">
-            <CardHeader className="pb-4">
-              <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
-                <div className="space-y-3 flex-1">
-                  <CardTitle className="text-3xl font-bold">{challenge.title}</CardTitle>
-                  <CardDescription className="text-lg text-muted-foreground">
-                    {challenge.description.split('\n')[0]} {/* Show first line as subtitle */}
-                  </CardDescription>
-                </div>
-                
-                <div className="flex flex-wrap gap-2 lg:justify-end">
-                  <Badge className={getDifficultyColor(challenge.difficulty)}>
-                    {challenge.difficulty}
-                  </Badge>
-                  <Badge className={getCategoryColor(challenge.finalCategory || challenge.category)}>
-                    {challenge.finalCategory || challenge.category}
-                  </Badge>
-                  <Badge variant="outline" className="font-mono font-semibold">
-                    {challenge.totalPoints || challenge.points} pts
-                  </Badge>
-                </div>
-              </div>
-              
-              <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground pt-4 border-t mt-4">
-                <div className="flex items-center gap-1">
-                  <Users className="w-4 h-4" />
+          {/* Challenge Info Bar */}
+          <Card className="mb-4 border">
+            <CardContent className="p-3">
+              <div className="flex flex-wrap items-center gap-3 text-xs">
+                <Badge className={getDifficultyColor(challenge.difficulty)}>
+                  {challenge.difficulty}
+                </Badge>
+                <Badge className={getCategoryColor(challenge.finalCategory || challenge.category)}>
+                  {challenge.finalCategory || challenge.category}
+                </Badge>
+                <Badge variant="outline" className="font-mono font-semibold">
+                  {challenge.totalPoints || challenge.points} pts
+                </Badge>
+                <div className="flex items-center gap-1 text-muted-foreground">
+                  <Users className="w-3 h-3" />
                   <span>{challenge.solvedBy?.length || 0} solves</span>
                 </div>
-                <div className="flex items-center gap-1">
-                  <Clock className="w-4 h-4" />
+                <div className="flex items-center gap-1 text-muted-foreground">
+                  <Clock className="w-3 h-3" />
                   <span>
                     {challenge.createdAt?.toDate?.()?.toLocaleDateString() || 
                      new Date(challenge.createdAt).toLocaleDateString()}
                   </span>
                 </div>
-                <div className="flex items-center gap-1">
-                  <span>Created by: {challenge.createdByName || 'Unknown'}</span>
+                <div className="text-muted-foreground">
+                  By: {challenge.createdByName || 'Unknown'}
                 </div>
                 {challenge.originalCreator && (
-                  <div className="flex items-center gap-1">
-                    <span>Original creator: {challenge.originalCreator.name}</span>
+                  <div className="flex items-center gap-1 text-muted-foreground">
+                    <span>Original: </span>
+                    {challenge.originalCreator.url ? (
+                      <a 
+                        href={challenge.originalCreator.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-primary hover:underline"
+                      >
+                        {challenge.originalCreator.name}
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    ) : (
+                      <span>{challenge.originalCreator.name}</span>
+                    )}
                   </div>
                 )}
               </div>
-            </CardHeader>
+            </CardContent>
           </Card>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Main Content */}
-            <div className="lg:col-span-2 space-y-6">
+            <div className="lg:col-span-2 space-y-4">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="description">Description</TabsTrigger>
-                  <TabsTrigger value="hints">Hints</TabsTrigger>
-                  <TabsTrigger value="files">Files & Links</TabsTrigger>
+                  <TabsTrigger value="description" className="text-xs">Description</TabsTrigger>
+                  <TabsTrigger value="hints" className="text-xs">Hints ({challenge.hints?.length || 0})</TabsTrigger>
+                  <TabsTrigger value="files" className="text-xs">
+                    Files & Links ({(challenge.files?.length || 0)})
+                  </TabsTrigger>
                 </TabsList>
                 
-                <TabsContent value="description" className="space-y-4 mt-4">
-                  <Card>
-                    <CardContent className="p-6">
-                      <div className="space-y-4">
+                <TabsContent value="description" className="space-y-3 mt-3">
+                  <Card className="border">
+                    <CardContent className="p-4">
+                      <div className="space-y-3">
                         {challenge.hasMultipleQuestions && challenge.questions ? (
-                          <div className="space-y-6">
-                            <h3 className="text-xl font-semibold">Questions</h3>
+                          <div className="space-y-3">
+                            <h3 className="text-lg font-semibold">Questions</h3>
                             {challenge.questions.map((question, index) => (
-                              <div key={question.id} className="border rounded-lg p-4">
-                                <h4 className="font-semibold mb-2">Question {index + 1}</h4>
-                                <p className="mb-3 text-muted-foreground">{question.question}</p>
-                                <div className="flex items-center justify-between text-sm">
+                              <div key={question.id} className="border rounded p-3">
+                                <h4 className="font-semibold text-sm mb-1">Question {index + 1}</h4>
+                                <p className="mb-2 text-xs text-muted-foreground">{question.question}</p>
+                                <div className="flex items-center justify-between text-xs">
                                   <span className="font-mono font-semibold">{question.points} points</span>
                                   {challenge.solvedBy?.includes(user?.uid || '') && (
-                                    <Badge variant="outline" className="font-mono">
+                                    <Badge variant="outline" className="font-mono text-xs">
                                       Flag: {question.flag}
                                     </Badge>
                                   )}
@@ -432,28 +441,28 @@ const ChallengeDetail = () => {
                             ))}
                           </div>
                         ) : (
-                          <div className="space-y-4">
+                          <div className="space-y-3">
                             {renderChallengeContent()}
                             
                             {challenge.flagFormat && (
-                              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                <p className="text-sm text-blue-800">
+                              <div className="p-3 bg-blue-500/10 border border-blue-200 rounded text-xs">
+                                <p className="text-blue-600">
                                   <strong>Flag Format:</strong> {challenge.flagFormat}
                                 </p>
                               </div>
                             )}
                             
                             {isSolved && challenge.flag && (
-                              <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                              <div className="p-3 bg-green-500/10 border border-green-200 rounded">
                                 <div className="flex items-center justify-between">
-                                  <p className="text-sm text-green-800 font-mono break-all">
+                                  <p className="text-xs text-green-600 font-mono break-all">
                                     <strong>Flag:</strong> {challenge.flag}
                                   </p>
                                   <Button
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => copyToClipboard(challenge.flag!)}
-                                    className="h-8 px-2"
+                                    className="h-6 px-2"
                                   >
                                     <Copy className="w-3 h-3" />
                                   </Button>
@@ -467,84 +476,71 @@ const ChallengeDetail = () => {
                   </Card>
                 </TabsContent>
                 
-                <TabsContent value="hints" className="mt-4">
-                  <Card>
-                    <CardContent className="p-6">
+                <TabsContent value="hints" className="mt-3">
+                  <Card className="border">
+                    <CardContent className="p-4">
                       {challenge.hints && challenge.hints.length > 0 ? (
-                        <div className="space-y-4">
+                        <div className="space-y-2">
                           {challenge.hints.map((hint, index) => (
-                            <div key={index} className="border rounded-lg p-4">
-                              <div className="flex items-center justify-between mb-3">
-                                <h4 className="font-semibold text-lg">Hint {index + 1}</h4>
+                            <Card key={index} className="border">
+                              <CardContent className="p-3">
                                 <Button
-                                  variant="outline"
-                                  size="sm"
+                                  variant="ghost"
                                   onClick={() => toggleHint(index)}
-                                  className="flex items-center gap-2"
+                                  className="w-full justify-between p-0 h-auto hover:bg-transparent"
                                 >
-                                  {showHints[index] ? (
-                                    <EyeOff className="w-4 h-4" />
-                                  ) : (
-                                    <Eye className="w-4 h-4" />
-                                  )}
-                                  {showHints[index] ? 'Hide' : 'Reveal'}
+                                  <div className="flex items-center gap-2">
+                                    <Lightbulb className="w-3 h-3" />
+                                    <span className="text-sm">Hint {index + 1}</span>
+                                  </div>
+                                  <div className={`transform transition-transform ${showHints[index] ? 'rotate-180' : ''}`}>
+                                    ↓
+                                  </div>
                                 </Button>
-                              </div>
-                              {showHints[index] && (
-                                <p className="text-muted-foreground leading-relaxed p-3 bg-gray-50 rounded border">
-                                  {hint}
-                                </p>
-                              )}
-                            </div>
+                                {showHints[index] && (
+                                  <p className="mt-2 text-xs text-muted-foreground pl-5">
+                                    {hint}
+                                  </p>
+                                )}
+                              </CardContent>
+                            </Card>
                           ))}
                         </div>
                       ) : (
-                        <div className="text-center py-8">
-                          <p className="text-muted-foreground">No hints available for this challenge.</p>
+                        <div className="text-center py-4">
+                          <p className="text-sm text-muted-foreground">No hints available.</p>
                         </div>
                       )}
                     </CardContent>
                   </Card>
                 </TabsContent>
                 
-                <TabsContent value="files" className="mt-4">
-                  <Card>
-                    <CardContent className="p-6">
+                <TabsContent value="files" className="mt-3">
+                  <Card className="border">
+                    <CardContent className="p-4">
                       {challenge.files && challenge.files.length > 0 ? (
-                        <div className="space-y-3">
-                          {challenge.files.map((file) => (
-                            <div key={file.id} className="flex items-center justify-between p-4 border rounded-lg">
-                              <div className="flex items-center gap-3 flex-1">
-                                {file.type === 'file' ? (
-                                  <FileText className="w-5 h-5 text-blue-600" />
-                                ) : (
-                                  <Link className="w-5 h-5 text-green-600" />
-                                )}
-                                <div className="flex-1 min-w-0">
-                                  <p className="font-medium truncate">{file.name}</p>
-                                  {file.type === 'link' && (
-                                    <a 
-                                      href={file.url} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer"
-                                      className="text-sm text-blue-600 hover:underline break-all"
-                                    >
-                                      {file.url}
-                                    </a>
-                                  )}
-                                </div>
-                              </div>
-                              {file.type === 'file' && (
-                                <Button variant="outline" size="sm">
-                                  Download
-                                </Button>
+                        <div className="space-y-2">
+                          {challenge.files.map((file, index) => (
+                            <a
+                              key={index}
+                              href={file.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 p-2 text-sm border rounded hover:bg-accent transition-colors"
+                            >
+                              {file.type === 'file' ? (
+                                <FileText className="w-3 h-3" />
+                              ) : (
+                                <Link className="w-3 h-3" />
                               )}
-                            </div>
+                              <span className="flex-1 truncate">{file.name}</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
                           ))}
                         </div>
                       ) : (
-                        <div className="text-center py-8">
-                          <p className="text-muted-foreground">No files or links available for this challenge.</p>
+                        <div className="text-center py-4">
+                          <p className="text-sm text-muted-foreground">No files or links available.</p>
                         </div>
                       )}
                     </CardContent>
@@ -554,57 +550,67 @@ const ChallengeDetail = () => {
             </div>
 
             {/* Sidebar */}
-            <div className="space-y-6">
+            <div className="space-y-4">
               {/* Flag Submission */}
-              <Card>
-                <CardHeader className="pb-4">
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Flag className="w-5 h-5" />
+              <Card className="border sticky top-4">
+                <CardHeader className="p-4 pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Flag className="w-4 h-4" />
                     Submit Flag
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="p-4 pt-2 space-y-3">
                   {message && (
-                    <Alert className={message.type === 'success' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}>
+                    <Alert className={`text-sm ${message.type === 'success' ? 'bg-green-500/10 border-green-200' : 'bg-red-500/10 border-red-200'}`}>
                       {message.type === 'success' ? (
                         <CheckCircle className="w-4 h-4 text-green-600" />
                       ) : (
                         <XCircle className="w-4 h-4 text-red-600" />
                       )}
-                      <AlertDescription className={message.type === 'success' ? 'text-green-800' : 'text-red-800'}>
+                      <AlertDescription className={message.type === 'success' ? 'text-green-600' : 'text-red-600'}>
                         {message.text}
                       </AlertDescription>
                     </Alert>
                   )}
 
                   {!isSolved ? (
-                    <div className="space-y-3">
-                      <div className="space-y-2">
-                        <Label htmlFor="flag" className="text-sm font-medium">Enter Flag</Label>
+                    <div className="space-y-2">
+                      <div className="space-y-1">
+                        <Label htmlFor="flag" className="text-xs font-medium">Enter Flag</Label>
                         <Input
                           id="flag"
                           placeholder="CTF{...} or flag content"
                           value={flagInput}
                           onChange={(e) => setFlagInput(e.target.value)}
                           onKeyPress={(e) => e.key === 'Enter' && submitFlag()}
-                          className="font-mono"
+                          className="font-mono text-sm h-9"
                         />
                       </div>
                       <Button 
                         onClick={submitFlag} 
                         disabled={submitting || !flagInput.trim()}
-                        className="w-full"
-                        size="lg"
+                        className="w-full h-9"
+                        variant="terminal"
                       >
-                        {submitting ? "Submitting..." : "Submit Flag"}
+                        {submitting ? (
+                          <>
+                            <div className="animate-spin w-3 h-3 border border-white border-t-transparent rounded-full mr-2"></div>
+                            Checking...
+                          </>
+                        ) : (
+                          <>
+                            <Shield className="w-3 h-3 mr-1" />
+                            Submit Flag
+                          </>
+                        )}
                       </Button>
                     </div>
                   ) : (
-                    <div className="text-center p-4 bg-green-50 border border-green-200 rounded-lg">
-                      <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-2" />
-                      <p className="text-green-800 font-semibold text-lg">Challenge Solved!</p>
-                      <p className="text-green-700 text-sm mt-1">
-                        You earned {challenge.totalPoints || challenge.points} points
+                    <div className="text-center p-3 bg-green-500/10 border border-green-200 rounded">
+                      <CheckCircle className="w-8 h-8 text-green-600 mx-auto mb-1" />
+                      <p className="text-green-600 font-semibold text-sm">Challenge Solved!</p>
+                      <p className="text-green-600 text-xs mt-1">
+                        +{challenge.totalPoints || challenge.points} points
                       </p>
                     </div>
                   )}
@@ -613,25 +619,25 @@ const ChallengeDetail = () => {
 
               {/* Submission History */}
               {submissions.length > 0 && (
-                <Card>
-                  <CardHeader className="pb-4">
-                    <CardTitle className="text-lg">Submission History</CardTitle>
+                <Card className="border">
+                  <CardHeader className="p-4 pb-2">
+                    <CardTitle className="text-base">Submission History</CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                  <CardContent className="p-4 pt-2">
+                    <div className="space-y-1 max-h-48 overflow-y-auto">
                       {submissions.map((submission) => (
-                        <div key={submission.id} className="flex items-center justify-between p-3 border rounded">
-                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <div key={submission.id} className="flex items-center justify-between p-2 border rounded text-xs">
+                          <div className="flex items-center gap-1 flex-1 min-w-0">
                             {submission.isCorrect ? (
-                              <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+                              <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />
                             ) : (
-                              <XCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                              <XCircle className="w-3 h-3 text-red-600 flex-shrink-0" />
                             )}
-                            <code className="text-sm truncate font-mono">{submission.flag}</code>
+                            <code className="truncate font-mono">{submission.flag}</code>
                           </div>
-                          <span className="text-xs text-muted-foreground flex-shrink-0 ml-2">
+                          <span className="text-muted-foreground flex-shrink-0 ml-1 text-xs">
                             {submission.submittedAt?.toDate?.()?.toLocaleTimeString() || 
-                             new Date(submission.submittedAt).toLocaleTimeString()}
+                             new Date(submission.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
                       ))}
