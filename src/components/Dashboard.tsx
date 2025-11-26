@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Trophy, Target, Clock, TrendingUp, User, Calendar, Activity, Settings, Award, BookOpen, GraduationCap, Users } from "lucide-react";
+import { Trophy, Target, TrendingUp, User, Calendar, Settings, Award, GraduationCap, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuthContext } from "../contexts/AuthContext";
 import { db } from "../firebase";
@@ -13,7 +13,6 @@ interface UserStats {
   totalPoints: number;
   challengesSolved: number;
   currentRank: number;
-  timeSpent: string;
   username: string;
   joinDate: string;
   firstName?: string;
@@ -45,22 +44,12 @@ interface Event {
   participants?: string[];
 }
 
-interface Activity {
-  id: string;
-  action: string;
-  description: string;
-  timestamp: any;
-  points?: number;
-  userId?: string;
-}
-
 const Dashboard = () => {
   const { user } = useAuthContext();
   const navigate = useNavigate();
   const [userStats, setUserStats] = useState<UserStats | null>(null);
   const [solvedChallenges, setSolvedChallenges] = useState<Challenge[]>([]);
   const [eventsParticipated, setEventsParticipated] = useState<Event[]>([]);
-  const [userActivity, setUserActivity] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<any>(null);
@@ -93,6 +82,83 @@ const Dashboard = () => {
     }
   };
 
+  // Format date properly - simplified version
+  const formatDate = (dateInput: any) => {
+    try {
+      if (!dateInput) return "recently";
+      
+      let date: Date;
+      
+      // If it's already a Date object
+      if (dateInput instanceof Date) {
+        date = dateInput;
+      }
+      // If it's a Firestore timestamp with toDate method
+      else if (dateInput && typeof dateInput === 'object' && typeof dateInput.toDate === 'function') {
+        date = dateInput.toDate();
+      }
+      // If it's a string (ISO string or other date string)
+      else if (typeof dateInput === 'string') {
+        date = new Date(dateInput);
+      }
+      // If it's a number (timestamp)
+      else if (typeof dateInput === 'number') {
+        date = new Date(dateInput);
+      }
+      // Fallback to current date
+      else {
+        date = new Date();
+      }
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return "recently";
+      }
+      
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+      
+    } catch (error) {
+      console.error("Date formatting error:", error);
+      return "recently";
+    }
+  };
+
+  // Format Firestore timestamp for solved challenges
+  const formatFirestoreTimestamp = (timestamp: any) => {
+    try {
+      let date: Date;
+      
+      // Handle Firestore timestamp object
+      if (timestamp && typeof timestamp === 'object' && typeof timestamp.toDate === 'function') {
+        date = timestamp.toDate();
+      }
+      // Handle regular date string or ISO string
+      else if (timestamp) {
+        date = new Date(timestamp);
+      }
+      // Fallback
+      else {
+        return 'Recently';
+      }
+      
+      if (isNaN(date.getTime())) {
+        return 'Recently';
+      }
+      
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } catch (error) {
+      return 'Recently';
+    }
+  };
+
   // Fetch user dashboard data from Firestore
   const fetchDashboardData = async () => {
     if (!user) return;
@@ -111,13 +177,23 @@ const Dashboard = () => {
         
         setUserProfile(userData);
         
+        // Fix challengesSolved to ensure it's a number
+        const challengesSolved = typeof userData.challengesSolved === 'number' 
+          ? userData.challengesSolved 
+          : (userData.challengesSolved ? parseInt(userData.challengesSolved) || 0 : 0);
+
+        // Get join date - prioritize user document, fallback to auth metadata
+        let joinDate = userData.createdAt;
+        if (!joinDate && user?.metadata?.creationTime) {
+          joinDate = user.metadata.creationTime;
+        }
+        
         setUserStats({
           totalPoints: userData.totalPoints || 0,
-          challengesSolved: userData.challengesSolved || 0,
+          challengesSolved: challengesSolved,
           currentRank: userData.currentRank || 0,
-          timeSpent: userData.timeSpent || "0h 0m",
           username: userData.username || user?.email?.split('@')[0] || 'Hacker',
-          joinDate: userData.createdAt || user?.metadata.creationTime || new Date().toISOString(),
+          joinDate: joinDate || new Date().toISOString(),
           firstName: userData.firstName,
           lastName: userData.lastName,
           displayName: userData.displayName,
@@ -129,13 +205,14 @@ const Dashboard = () => {
       } else {
         console.log("No user document found in Firestore");
         // Set real default stats from Firebase Auth
+        const joinDate = user?.metadata?.creationTime || new Date().toISOString();
+        
         setUserStats({
           totalPoints: 0,
           challengesSolved: 0,
           currentRank: 0,
-          timeSpent: "0h 0m",
           username: user?.email?.split('@')[0] || 'Hacker',
-          joinDate: user?.metadata.creationTime || new Date().toISOString()
+          joinDate: joinDate
         });
       }
 
@@ -181,59 +258,32 @@ const Dashboard = () => {
         setEventsParticipated([]);
       }
 
-      // 4. Fetch real user activity
-      try {
-        const activityQuery = query(
-          collection(db, "activity"),
-          where("userId", "==", user.uid),
-          orderBy("timestamp", "desc"),
-          limit(10)
-        );
-        const activitySnapshot = await getDocs(activityQuery);
-        const activityData = activitySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Activity[];
-        
-        console.log("Real user activity:", activityData);
-        setUserActivity(activityData);
-      } catch (error) {
-        console.log("No activity collection yet, creating default activity");
-        // Create default account creation activity in Firestore
-        const defaultActivity: Activity = {
-          id: "welcome",
-          action: "Account Created",
-          description: "Welcome to ZedCTF! Start your cybersecurity journey.",
-          timestamp: user?.metadata.creationTime || new Date(),
-          userId: user.uid
-        };
-        setUserActivity([defaultActivity]);
-      }
-
     } catch (err) {
       console.error("Error fetching real dashboard data:", err);
       // Set real fallback data from Firebase Auth
+      const joinDate = user?.metadata?.creationTime || new Date().toISOString();
+      
       setUserStats({
         totalPoints: 0,
         challengesSolved: 0,
         currentRank: 0,
-        timeSpent: "0h 0m",
         username: user?.email?.split('@')[0] || 'Hacker',
-        joinDate: user?.metadata.creationTime || new Date().toISOString()
+        joinDate: joinDate
       });
       setSolvedChallenges([]);
       setEventsParticipated([]);
-      setUserActivity([
-        {
-          id: "welcome",
-          action: "Account Created",
-          description: "Welcome to ZedCTF! Start your cybersecurity journey.",
-          timestamp: user?.metadata.creationTime || new Date()
-        }
-      ]);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Handle profile modal close with refresh
+  const handleProfileModalClose = () => {
+    setIsProfileModalOpen(false);
+    // Refresh data after profile update
+    setTimeout(() => {
+      fetchDashboardData();
+    }, 1000);
   };
 
   useEffect(() => {
@@ -246,7 +296,7 @@ const Dashboard = () => {
     return (
       <>
         <Navbar />
-        <section id="dashboard" className="pt-24 pb-16 min-h-screen">
+        <section id="dashboard" className="pt-20 lg:pt-24 pb-16 min-h-screen bg-background">
           <div className="container px-4 mx-auto text-center">
             <div className="animate-spin w-16 h-16 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
             <p className="mt-4 text-muted-foreground">Loading your dashboard...</p>
@@ -260,14 +310,14 @@ const Dashboard = () => {
   return (
     <>
       <Navbar />
-      <section id="dashboard" className="pt-24 pb-16 min-h-screen">
+      <section id="dashboard" className="pt-20 lg:pt-24 pb-16 min-h-screen bg-background">
         <div className="container px-4 mx-auto">
-          {/* User Welcome Section - Removed Logout Button */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between">
+          {/* User Welcome Section - Mobile Optimized */}
+          <div className="mb-6 lg:mb-8">
+            <div className="flex flex-col sm:flex-row sm:items-start gap-4">
               <div className="flex items-center gap-4">
-                <div className="relative">
-                  <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center overflow-hidden border-2 border-primary/30">
+                <div className="relative shrink-0">
+                  <div className="w-14 h-14 sm:w-16 sm:h-16 bg-primary/20 rounded-full flex items-center justify-center overflow-hidden border-2 border-primary/30">
                     {user?.photoURL || userProfile?.photoURL ? (
                       <img 
                         src={user?.photoURL || userProfile?.photoURL} 
@@ -275,7 +325,7 @@ const Dashboard = () => {
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <User className="w-8 h-8 text-primary" />
+                      <User className="w-6 h-6 sm:w-8 sm:h-8 text-primary" />
                     )}
                   </div>
                   <button
@@ -286,38 +336,37 @@ const Dashboard = () => {
                     <Settings className="w-3 h-3" />
                   </button>
                 </div>
-                <div>
-                  <h2 className="text-4xl font-bold">
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold break-words">
                     Welcome back,{" "}
                     <span className="text-primary">
                       {userStats?.displayName || user?.displayName || userStats?.username || user?.email?.split('@')[0] || 'Hacker'}
                     </span>
                   </h2>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <span>{user?.email}</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-sm text-muted-foreground mt-1">
+                    <span className="break-all">{user?.email}</span>
                     {userProfile?.role && (
                       <>
-                        <span>•</span>
+                        <span className="hidden sm:inline">•</span>
                         <div className="flex items-center gap-1">
                           {getRoleIcon(userProfile.role)}
                           <span>{getRoleLabel(userProfile.role)}</span>
                         </div>
                       </>
                     )}
-                    <span>•</span>
-                    <span>Member since{" "}
-                      {userStats?.joinDate
-                        ? new Date(userStats.joinDate).toLocaleDateString()
-                        : "recently"}
+                    <span className="hidden sm:inline">•</span>
+                    <span className="text-xs sm:text-sm">
+                      Member since{" "}
+                      {formatDate(userStats?.joinDate)}
                     </span>
                   </div>
                   {userProfile?.institution && (
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-xs sm:text-sm text-muted-foreground mt-1">
                       {userProfile.institution}
                     </p>
                   )}
                   {userProfile?.bio && (
-                    <p className="text-sm text-muted-foreground mt-1 max-w-md">
+                    <p className="text-xs sm:text-sm text-muted-foreground mt-1 line-clamp-2">
                       {userProfile.bio}
                     </p>
                   )}
@@ -326,102 +375,84 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* Statistics Grid - Real Data Only */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {/* Statistics Grid - Only 2 Cards Now */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 lg:mb-8">
             <Card className="border-border hover:border-primary/50 transition-all duration-300">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardHeader className="flex flex-row items-center justify-between pb-2 p-4">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
                   Total Points
                 </CardTitle>
                 <Trophy className="w-5 h-5 text-primary" />
               </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold mb-2">
+              <CardContent className="p-4 pt-0">
+                <div className="text-2xl lg:text-3xl font-bold mb-2">
                   {userStats?.totalPoints?.toLocaleString() || "0"}
                 </div>
-                <p className="text-xs text-muted-foreground">Lifetime points earned</p>
+                <p className="text-xs text-muted-foreground">From correct challenge solutions</p>
               </CardContent>
             </Card>
 
             <Card className="border-border hover:border-primary/50 transition-all duration-300">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Challenges Solved
-                </CardTitle>
-                <Target className="w-5 h-5 text-secondary" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold mb-2">
-                  {userStats?.challengesSolved || "0"}
-                </div>
-                <p className="text-xs text-muted-foreground">Total challenges completed</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-border hover:border-primary/50 transition-all duration-300">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardHeader className="flex flex-row items-center justify-between pb-2 p-4">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
                   Current Rank
                 </CardTitle>
                 <TrendingUp className="w-5 h-5 text-primary" />
               </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold mb-2">
+              <CardContent className="p-4 pt-0">
+                <div className="text-2xl lg:text-3xl font-bold mb-2">
                   #{userStats?.currentRank || "0"}
                 </div>
                 <p className="text-xs text-muted-foreground">Global leaderboard position</p>
               </CardContent>
             </Card>
-
-            <Card className="border-border hover:border-primary/50 transition-all duration-300">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Time Spent
-                </CardTitle>
-                <Clock className="w-5 h-5 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold mb-2">
-                  {userStats?.timeSpent || "0h 0m"}
-                </div>
-                <p className="text-xs text-muted-foreground">Total practice time</p>
-              </CardContent>
-            </Card>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Solved Challenges - Real Data Only */}
+            {/* Recently Solved Challenges */}
             <Card className="border-border">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+              <CardHeader className="p-4 sm:p-6">
+                <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
                   <Target className="w-5 h-5 text-primary" />
                   Recently Solved Challenges
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-4 sm:p-6 pt-0">
                 {solvedChallenges.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <Target className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>No challenges solved yet</p>
-                    <p className="text-sm mt-2">Start practicing to see your progress here</p>
+                    <p className="text-base">No challenges solved yet</p>
+                    <p className="text-sm mt-2 mb-4">Solve challenges to see them here</p>
+                    <button 
+                      onClick={() => navigate('/challenges')}
+                      className="px-6 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm"
+                    >
+                      Browse Challenges
+                    </button>
                   </div>
                 ) : (
                   <div className="space-y-4">
                     {solvedChallenges.map((challenge) => (
-                      <div key={challenge.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/20 border border-border">
+                      <div 
+                        key={challenge.id} 
+                        className="flex items-center justify-between p-4 rounded-lg bg-muted/20 border border-border hover:bg-muted/40 cursor-pointer transition-colors"
+                        onClick={() => navigate(`/challenges/${challenge.id}`)}
+                      >
                         <div className="flex-1">
-                          <div className="font-medium">{challenge.title}</div>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <span>{challenge.category}</span>
+                          <div className="font-medium text-base hover:text-primary transition-colors">
+                            {challenge.title}
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
+                            <span className="capitalize">{challenge.category}</span>
                             <span>•</span>
-                            <span>{challenge.difficulty}</span>
+                            <span className="capitalize">{challenge.difficulty}</span>
                             <span>•</span>
                             <span>
-                              {challenge.solvedAt ? new Date(challenge.solvedAt.toDate ? challenge.solvedAt.toDate() : challenge.solvedAt).toLocaleDateString() : 'Recently'}
+                              {formatFirestoreTimestamp(challenge.solvedAt)}
                             </span>
                           </div>
                         </div>
-                        <div className="text-primary font-bold">+{challenge.points}</div>
+                        <div className="text-primary font-bold text-lg">+{challenge.points}</div>
                       </div>
                     ))}
                   </div>
@@ -429,74 +460,47 @@ const Dashboard = () => {
               </CardContent>
             </Card>
 
-            {/* Events Participated - Real Data Only */}
+            {/* Events Participated */}
             <Card className="border-border">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+              <CardHeader className="p-4 sm:p-6">
+                <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
                   <Calendar className="w-5 h-5 text-primary" />
                   Events Participated In
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-4 sm:p-6 pt-0">
                 {eventsParticipated.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>No events participated yet</p>
-                    <p className="text-sm mt-2">Join live events to appear here</p>
+                    <p className="text-base">No events participated yet</p>
+                    <p className="text-sm mt-2 mb-4">Join CTF events to compete</p>
+                    <button 
+                      onClick={() => navigate('/events')}
+                      className="px-6 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90 transition-colors text-sm"
+                    >
+                      View Events
+                    </button>
                   </div>
                 ) : (
                   <div className="space-y-4">
                     {eventsParticipated.map((event) => (
-                      <div key={event.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/20 border border-border">
+                      <div key={event.id} className="flex items-center justify-between p-4 rounded-lg bg-muted/20 border border-border">
                         <div className="flex-1">
-                          <div className="font-medium">{event.name}</div>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <div className="font-medium text-base">{event.name}</div>
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
                             <span>{event.date}</span>
-                            {event.position && <span>• Position: #{event.position}</span>}
+                            {event.position && (
+                              <>
+                                <span>•</span>
+                                <span>Position: #{event.position}</span>
+                              </>
+                            )}
                           </div>
                         </div>
                         <div className="text-right">
                           <div className="text-secondary font-bold">{event.prize}</div>
                           {event.pointsEarned > 0 && (
-                            <div className="text-xs text-primary">+{event.pointsEarned} pts</div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* User Activity - Real Data Only */}
-            <Card className="border-border lg:col-span-2">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-primary" />
-                  Recent Activity
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {userActivity.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>No recent activity</p>
-                    <p className="text-sm mt-2">Your activity will appear here</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {userActivity.map((activity) => (
-                      <div key={activity.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/20 border border-border">
-                        <div className="flex-1">
-                          <div className="font-medium">{activity.action}</div>
-                          <div className="text-sm text-muted-foreground">{activity.description}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-xs text-muted-foreground">
-                            {activity.timestamp ? new Date(activity.timestamp.toDate ? activity.timestamp.toDate() : activity.timestamp).toLocaleDateString() : 'Recently'}
-                          </div>
-                          {activity.points && (
-                            <div className="text-sm text-primary font-bold">+{activity.points}</div>
+                            <div className="text-sm text-primary">+{event.pointsEarned} pts</div>
                           )}
                         </div>
                       </div>
@@ -513,7 +517,7 @@ const Dashboard = () => {
       {/* Profile Modal */}
       <ProfileModal 
         isOpen={isProfileModalOpen}
-        onClose={() => setIsProfileModalOpen(false)}
+        onClose={handleProfileModalClose}
       />
     </>
   );
