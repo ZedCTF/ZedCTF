@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Trophy, Target, TrendingUp, User, Calendar, Settings, Award, GraduationCap, Users } from "lucide-react";
+import { Trophy, TrendingUp, User, Calendar, Settings, Award, GraduationCap, Users, Target } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuthContext } from "../contexts/AuthContext";
 import { db } from "../firebase";
@@ -24,16 +24,6 @@ interface UserStats {
   photoURL?: string;
 }
 
-interface Challenge {
-  id: string;
-  title: string;
-  points: number;
-  solvedAt: any;
-  category: string;
-  difficulty: string;
-  solvedBy?: string[];
-}
-
 interface Event {
   id: string;
   name: string;
@@ -44,12 +34,21 @@ interface Event {
   participants?: string[];
 }
 
+interface Challenge {
+  id: string;
+  title: string;
+  points: number;
+  solvedAt: any;
+  category: string;
+  difficulty: string;
+}
+
 const Dashboard = () => {
   const { user } = useAuthContext();
   const navigate = useNavigate();
   const [userStats, setUserStats] = useState<UserStats | null>(null);
-  const [solvedChallenges, setSolvedChallenges] = useState<Challenge[]>([]);
   const [eventsParticipated, setEventsParticipated] = useState<Event[]>([]);
+  const [recentChallenges, setRecentChallenges] = useState<Challenge[]>([]);
   const [loading, setLoading] = useState(true);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<any>(null);
@@ -82,35 +81,25 @@ const Dashboard = () => {
     }
   };
 
-  // Format date properly - simplified version
+  // Format date properly
   const formatDate = (dateInput: any) => {
     try {
       if (!dateInput) return "recently";
       
       let date: Date;
       
-      // If it's already a Date object
       if (dateInput instanceof Date) {
         date = dateInput;
-      }
-      // If it's a Firestore timestamp with toDate method
-      else if (dateInput && typeof dateInput === 'object' && typeof dateInput.toDate === 'function') {
+      } else if (dateInput && typeof dateInput === 'object' && typeof dateInput.toDate === 'function') {
         date = dateInput.toDate();
-      }
-      // If it's a string (ISO string or other date string)
-      else if (typeof dateInput === 'string') {
+      } else if (typeof dateInput === 'string') {
         date = new Date(dateInput);
-      }
-      // If it's a number (timestamp)
-      else if (typeof dateInput === 'number') {
+      } else if (typeof dateInput === 'number') {
         date = new Date(dateInput);
-      }
-      // Fallback to current date
-      else {
+      } else {
         date = new Date();
       }
       
-      // Check if date is valid
       if (isNaN(date.getTime())) {
         return "recently";
       }
@@ -127,71 +116,179 @@ const Dashboard = () => {
     }
   };
 
-  // Format Firestore timestamp for solved challenges
-  const formatFirestoreTimestamp = (timestamp: any) => {
+  // Calculate user's REAL rank from global leaderboard
+  const calculateUserRank = async (userId: string, userPoints: number) => {
     try {
-      let date: Date;
+      console.log("Calculating REAL rank for user:", userId, "with points:", userPoints);
       
-      // Handle Firestore timestamp object
-      if (timestamp && typeof timestamp === 'object' && typeof timestamp.toDate === 'function') {
-        date = timestamp.toDate();
-      }
-      // Handle regular date string or ISO string
-      else if (timestamp) {
-        date = new Date(timestamp);
-      }
-      // Fallback
-      else {
-        return 'Recently';
-      }
+      // Get all users sorted by points to get real ranking
+      const usersQuery = query(
+        collection(db, "users"),
+        orderBy("totalPoints", "desc")
+      );
       
-      if (isNaN(date.getTime())) {
-        return 'Recently';
-      }
+      const usersSnapshot = await getDocs(usersQuery);
       
-      return date.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      });
+      if (usersSnapshot.empty) {
+        console.log("No users found in database");
+        return 1; // If no users, user is rank 1
+      }
+
+      const allUsers = usersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        totalPoints: Number(doc.data().totalPoints) || 0,
+        displayName: doc.data().displayName || doc.data().username || 'Anonymous'
+      }));
+
+      console.log(`Found ${allUsers.length} users for REAL rank calculation`);
+
+      // Find the user's actual position in the sorted list
+      let rank = 1;
+      for (let i = 0; i < allUsers.length; i++) {
+        if (allUsers[i].id === userId) {
+          console.log(`User found at REAL position ${i + 1} in leaderboard`);
+          return i + 1; // Return actual position (1-based index)
+        }
+      }
+
+      // If user not found in the query (shouldn't happen but just in case)
+      console.log("User not found in leaderboard query, this shouldn't happen");
+      return allUsers.length + 1; // Return last position
+
     } catch (error) {
-      return 'Recently';
+      console.error("Error calculating REAL user rank:", error);
+      return 0; // Return 0 if unable to calculate
     }
   };
 
-  // Fetch user dashboard data from Firestore
+  // Fetch REAL solved challenges for the user
+  const fetchSolvedChallenges = async (userId: string) => {
+    try {
+      // Get all challenges and filter those solved by the user
+      const challengesQuery = query(
+        collection(db, "challenges"),
+        where("isActive", "==", true)
+      );
+      
+      const challengesSnapshot = await getDocs(challengesQuery);
+      const solvedChallenges: Challenge[] = [];
+
+      challengesSnapshot.forEach(doc => {
+        const challengeData = doc.data();
+        // Check if this challenge was solved by the user
+        if (challengeData.solvedBy && Array.isArray(challengeData.solvedBy)) {
+          if (challengeData.solvedBy.includes(userId)) {
+            solvedChallenges.push({
+              id: doc.id,
+              title: challengeData.title || 'Untitled Challenge',
+              points: challengeData.points || 0,
+              solvedAt: challengeData.solvedAt || new Date(),
+              category: challengeData.category || 'general',
+              difficulty: challengeData.difficulty || 'easy'
+            });
+          }
+        }
+      });
+
+      // Sort by solvedAt date (most recent first) and limit to 5
+      const sortedChallenges = solvedChallenges
+        .sort((a, b) => {
+          const dateA = a.solvedAt?.toDate ? a.solvedAt.toDate() : new Date(a.solvedAt);
+          const dateB = b.solvedAt?.toDate ? b.solvedAt.toDate() : new Date(b.solvedAt);
+          return dateB.getTime() - dateA.getTime();
+        })
+        .slice(0, 5);
+
+      console.log(`Found ${sortedChallenges.length} REAL solved challenges`);
+      return sortedChallenges;
+
+    } catch (error) {
+      console.error("Error fetching REAL solved challenges:", error);
+      return [];
+    }
+  };
+
+  // Fetch REAL events participated
+  const fetchEventsParticipated = async (userId: string) => {
+    try {
+      const eventsQuery = query(
+        collection(db, "events")
+      );
+      
+      const eventsSnapshot = await getDocs(eventsQuery);
+      const userEvents: Event[] = [];
+
+      eventsSnapshot.forEach(doc => {
+        const eventData = doc.data();
+        // Check if user participated in this event
+        if (eventData.participants && Array.isArray(eventData.participants)) {
+          if (eventData.participants.includes(userId)) {
+            userEvents.push({
+              id: doc.id,
+              name: eventData.name || 'Unnamed Event',
+              date: eventData.date || 'Unknown date',
+              prize: eventData.prize || 'Participation',
+              position: eventData.position || 0,
+              pointsEarned: eventData.pointsEarned || 0
+            });
+          }
+        }
+      });
+
+      // Sort by date (most recent first) and limit to 5
+      const sortedEvents = userEvents
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .slice(0, 5);
+
+      console.log(`Found ${sortedEvents.length} REAL events participated`);
+      return sortedEvents;
+
+    } catch (error) {
+      console.error("Error fetching REAL events:", error);
+      return [];
+    }
+  };
+
+  // Fetch REAL user dashboard data from Firestore
   const fetchDashboardData = async () => {
     if (!user) return;
 
     try {
       setLoading(true);
       
-      console.log("Fetching real dashboard data for user:", user.uid);
+      console.log("Fetching REAL dashboard data for user:", user.uid);
 
-      // 1. Fetch user stats from Firestore
+      // 1. Fetch REAL user stats from Firestore
       const userDoc = await getDoc(doc(db, "users", user.uid));
       
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        console.log("Real user data from Firestore:", userData);
+        console.log("REAL user data from Firestore:", userData);
         
         setUserProfile(userData);
         
-        // Fix challengesSolved to ensure it's a number
-        const challengesSolved = typeof userData.challengesSolved === 'number' 
-          ? userData.challengesSolved 
-          : (userData.challengesSolved ? parseInt(userData.challengesSolved) || 0 : 0);
+        const userPoints = Number(userData.totalPoints) || 0;
+        const challengesSolved = Number(userData.challengesSolved) || 0;
 
-        // Get join date - prioritize user document, fallback to auth metadata
+        // Calculate REAL rank from global leaderboard
+        const actualRank = await calculateUserRank(user.uid, userPoints);
+
+        // Get REAL solved challenges
+        const solvedChallenges = await fetchSolvedChallenges(user.uid);
+
+        // Get REAL events participated
+        const userEvents = await fetchEventsParticipated(user.uid);
+
+        // Get join date
         let joinDate = userData.createdAt;
         if (!joinDate && user?.metadata?.creationTime) {
           joinDate = user.metadata.creationTime;
         }
         
         setUserStats({
-          totalPoints: userData.totalPoints || 0,
+          totalPoints: userPoints,
           challengesSolved: challengesSolved,
-          currentRank: userData.currentRank || 0,
+          currentRank: actualRank,
           username: userData.username || user?.email?.split('@')[0] || 'Hacker',
           joinDate: joinDate || new Date().toISOString(),
           firstName: userData.firstName,
@@ -202,9 +299,11 @@ const Dashboard = () => {
           institution: userData.institution,
           photoURL: userData.photoURL
         });
+
+        setRecentChallenges(solvedChallenges);
+        setEventsParticipated(userEvents);
       } else {
         console.log("No user document found in Firestore");
-        // Set real default stats from Firebase Auth
         const joinDate = user?.metadata?.creationTime || new Date().toISOString();
         
         setUserStats({
@@ -214,53 +313,12 @@ const Dashboard = () => {
           username: user?.email?.split('@')[0] || 'Hacker',
           joinDate: joinDate
         });
-      }
-
-      // 2. Fetch real solved challenges
-      try {
-        const challengesQuery = query(
-          collection(db, "challenges"),
-          where("solvedBy", "array-contains", user.uid),
-          orderBy("solvedAt", "desc"),
-          limit(5)
-        );
-        const challengesSnapshot = await getDocs(challengesQuery);
-        const challengesData = challengesSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Challenge[];
-        
-        console.log("Real solved challenges:", challengesData);
-        setSolvedChallenges(challengesData);
-      } catch (error) {
-        console.log("No challenges collection or no solved challenges yet");
-        setSolvedChallenges([]);
-      }
-
-      // 3. Fetch real events participated
-      try {
-        const eventsQuery = query(
-          collection(db, "events"),
-          where("participants", "array-contains", user.uid),
-          orderBy("date", "desc"),
-          limit(5)
-        );
-        const eventsSnapshot = await getDocs(eventsQuery);
-        const eventsData = eventsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Event[];
-        
-        console.log("Real events participated:", eventsData);
-        setEventsParticipated(eventsData);
-      } catch (error) {
-        console.log("No events collection or no events participated yet");
+        setRecentChallenges([]);
         setEventsParticipated([]);
       }
 
     } catch (err) {
-      console.error("Error fetching real dashboard data:", err);
-      // Set real fallback data from Firebase Auth
+      console.error("Error fetching REAL dashboard data:", err);
       const joinDate = user?.metadata?.creationTime || new Date().toISOString();
       
       setUserStats({
@@ -270,7 +328,7 @@ const Dashboard = () => {
         username: user?.email?.split('@')[0] || 'Hacker',
         joinDate: joinDate
       });
-      setSolvedChallenges([]);
+      setRecentChallenges([]);
       setEventsParticipated([]);
     } finally {
       setLoading(false);
@@ -280,7 +338,6 @@ const Dashboard = () => {
   // Handle profile modal close with refresh
   const handleProfileModalClose = () => {
     setIsProfileModalOpen(false);
-    // Refresh data after profile update
     setTimeout(() => {
       fetchDashboardData();
     }, 1000);
@@ -312,7 +369,7 @@ const Dashboard = () => {
       <Navbar />
       <section id="dashboard" className="pt-20 lg:pt-24 pb-16 min-h-screen bg-background">
         <div className="container px-4 mx-auto">
-          {/* User Welcome Section - Mobile Optimized */}
+          {/* User Welcome Section */}
           <div className="mb-6 lg:mb-8">
             <div className="flex flex-col sm:flex-row sm:items-start gap-4">
               <div className="flex items-center gap-4">
@@ -375,7 +432,7 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* Statistics Grid - Only 2 Cards Now */}
+          {/* Statistics Grid - REAL Data */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 lg:mb-8">
             <Card className="border-border hover:border-primary/50 transition-all duration-300">
               <CardHeader className="flex flex-row items-center justify-between pb-2 p-4">
@@ -388,28 +445,29 @@ const Dashboard = () => {
                 <div className="text-2xl lg:text-3xl font-bold mb-2">
                   {userStats?.totalPoints?.toLocaleString() || "0"}
                 </div>
-                <p className="text-xs text-muted-foreground">From correct challenge solutions</p>
+                <p className="text-xs text-muted-foreground">From {userStats?.challengesSolved || 0} solved challenges</p>
               </CardContent>
             </Card>
 
             <Card className="border-border hover:border-primary/50 transition-all duration-300">
               <CardHeader className="flex flex-row items-center justify-between pb-2 p-4">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Current Rank
+                  Global Rank
                 </CardTitle>
                 <TrendingUp className="w-5 h-5 text-primary" />
               </CardHeader>
               <CardContent className="p-4 pt-0">
                 <div className="text-2xl lg:text-3xl font-bold mb-2">
-                  #{userStats?.currentRank || "0"}
+                  {userStats?.currentRank ? `#${userStats.currentRank}` : "Unranked"}
                 </div>
-                <p className="text-xs text-muted-foreground">Global leaderboard position</p>
+                <p className="text-xs text-muted-foreground">Real position on global leaderboard</p>
               </CardContent>
             </Card>
           </div>
 
+          {/* Recent Activity */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Recently Solved Challenges */}
+            {/* Recently Solved Challenges - REAL Data */}
             <Card className="border-border">
               <CardHeader className="p-4 sm:p-6">
                 <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
@@ -418,7 +476,7 @@ const Dashboard = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-4 sm:p-6 pt-0">
-                {solvedChallenges.length === 0 ? (
+                {recentChallenges.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <Target className="w-12 h-12 mx-auto mb-4 opacity-50" />
                     <p className="text-base">No challenges solved yet</p>
@@ -432,7 +490,7 @@ const Dashboard = () => {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {solvedChallenges.map((challenge) => (
+                    {recentChallenges.map((challenge) => (
                       <div 
                         key={challenge.id} 
                         className="flex items-center justify-between p-4 rounded-lg bg-muted/20 border border-border hover:bg-muted/40 cursor-pointer transition-colors"
@@ -446,10 +504,6 @@ const Dashboard = () => {
                             <span className="capitalize">{challenge.category}</span>
                             <span>•</span>
                             <span className="capitalize">{challenge.difficulty}</span>
-                            <span>•</span>
-                            <span>
-                              {formatFirestoreTimestamp(challenge.solvedAt)}
-                            </span>
                           </div>
                         </div>
                         <div className="text-primary font-bold text-lg">+{challenge.points}</div>
@@ -460,7 +514,7 @@ const Dashboard = () => {
               </CardContent>
             </Card>
 
-            {/* Events Participated */}
+            {/* Events Participated - REAL Data */}
             <Card className="border-border">
               <CardHeader className="p-4 sm:p-6">
                 <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
@@ -488,8 +542,8 @@ const Dashboard = () => {
                         <div className="flex-1">
                           <div className="font-medium text-base">{event.name}</div>
                           <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
-                            <span>{event.date}</span>
-                            {event.position && (
+                            <span>{formatDate(event.date)}</span>
+                            {event.position > 0 && (
                               <>
                                 <span>•</span>
                                 <span>Position: #{event.position}</span>
