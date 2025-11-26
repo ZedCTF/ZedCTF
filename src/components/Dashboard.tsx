@@ -494,7 +494,7 @@ const Dashboard = () => {
                       <div 
                         key={challenge.id} 
                         className="flex items-center justify-between p-4 rounded-lg bg-muted/20 border border-border hover:bg-muted/40 cursor-pointer transition-colors"
-                        onClick={() => navigate(`/challenges/${challenge.id}`)}
+                        onClick={() => navigate(`/challenge/${challenge.id}`)}
                       >
                         <div className="flex-1">
                           <div className="font-medium text-base hover:text-primary transition-colors">
