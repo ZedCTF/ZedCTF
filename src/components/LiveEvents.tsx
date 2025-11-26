@@ -52,6 +52,7 @@ const LiveEvents = () => {
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [registering, setRegistering] = useState<string | null>(null);
 
   // Calculate time left until event starts or ends
   const calculateTimeLeft = (startDate: string, endDate: string): string => {
@@ -133,7 +134,13 @@ const LiveEvents = () => {
 
       eventsSnapshot.docs.forEach(doc => {
         const data = doc.data();
-        console.log("Event data:", data);
+        console.log("Event data:", {
+          id: doc.id,
+          name: data.name,
+          registeredUsers: data.registeredUsers,
+          totalParticipants: data.totalParticipants,
+          participants: data.participants
+        });
         
         if (!data.startDate || !data.endDate) {
           console.log("Skipping event - missing dates:", data.name);
@@ -172,7 +179,7 @@ const LiveEvents = () => {
           upcomingData.push({
             ...baseEvent,
             date: `${formatDate(data.startDate)} at ${formatTime(data.startDate)}`,
-            registered: user ? baseEvent.registeredUsers?.includes(user.uid) || false : false,
+            registered: user ? (data.registeredUsers?.includes(user.uid) || false) : false,
             maxParticipants: data.maxIndividuals,
             maxIndividuals: data.maxIndividuals
           });
@@ -201,6 +208,8 @@ const LiveEvents = () => {
       return;
     }
 
+    setRegistering(eventId);
+
     try {
       const eventRef = doc(db, "events", eventId);
       const event = upcomingEvents.find(e => e.id === eventId);
@@ -209,30 +218,65 @@ const LiveEvents = () => {
         throw new Error("Event not found");
       }
 
+      console.log("Attempting to register user", user.uid, "for event", eventId);
+      console.log("Current event data:", {
+        registeredUsers: event.registeredUsers,
+        totalParticipants: event.totalParticipants,
+        participants: event.participants
+      });
+
       // Check if user is already registered
       if (event.registeredUsers?.includes(user.uid)) {
         alert("You are already registered for this event");
+        setRegistering(null);
         return;
       }
 
       // Check if event is full
       if (event.maxParticipants && event.participants >= event.maxParticipants) {
         alert("This event is full");
+        setRegistering(null);
         return;
       }
 
-      await updateDoc(eventRef, {
-        registeredUsers: arrayUnion(user.uid),
-        totalParticipants: (event.participants || 0) + 1
+      // Get current arrays and counts
+      const currentRegisteredUsers = event.registeredUsers || [];
+      const newRegisteredUsers = [...currentRegisteredUsers, user.uid];
+      const currentTotalParticipants = event.totalParticipants || event.participants || 0;
+
+      console.log("Updating with:", {
+        registeredUsers: newRegisteredUsers,
+        totalParticipants: currentTotalParticipants + 1
       });
 
+      // Update the event document - this matches the security rules
+      await updateDoc(eventRef, {
+        registeredUsers: newRegisteredUsers,
+        totalParticipants: currentTotalParticipants + 1
+      });
+
+      console.log("Registration successful!");
+
       // Refresh events data to update registration status
-      fetchEventsData();
+      await fetchEventsData();
       
-      alert("Successfully registered for the event!");
+      alert("🎉 Successfully registered for the event!");
+      
     } catch (error: any) {
       console.error('Failed to register for event:', error);
-      alert(`Failed to register for event: ${error.message}`);
+      console.error('Error code:', error.code);
+      console.error('Error message:', error.message);
+      
+      if (error.code === 'permission-denied') {
+        alert("❌ Permission denied. Please check if you're logged in and have proper permissions.");
+        console.log("Security rules blocked the update. Check if user has proper role.");
+      } else if (error.code === 'not-found') {
+        alert("❌ Event not found. Please try again.");
+      } else {
+        alert(`❌ Failed to register for event: ${error.message}`);
+      }
+    } finally {
+      setRegistering(null);
     }
   };
 
@@ -507,10 +551,17 @@ const LiveEvents = () => {
                           variant={event.registered ? "outline" : "terminal"}
                           className="md:ml-4 whitespace-nowrap"
                           onClick={() => !event.registered && registerForEvent(event.id)}
-                          disabled={event.registered || (event.maxParticipants ? event.participants >= event.maxParticipants : false)}
+                          disabled={event.registered || (event.maxParticipants ? event.participants >= event.maxParticipants : false) || registering === event.id}
                         >
-                          {event.registered ? "Registered ✓" : 
-                           event.maxParticipants && event.participants >= event.maxParticipants ? "Event Full" : "Register"}
+                          {registering === event.id ? (
+                            "Registering..."
+                          ) : event.registered ? (
+                            "Registered ✓"
+                          ) : event.maxParticipants && event.participants >= event.maxParticipants ? (
+                            "Event Full"
+                          ) : (
+                            "Register"
+                          )}
                         </Button>
                       </div>
                     </CardContent>

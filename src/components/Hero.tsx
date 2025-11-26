@@ -1,25 +1,23 @@
 // components/Hero.tsx
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Code2, Flag, Users, Shield, Clock, Trophy } from "lucide-react";
+import { ArrowRight, Code2, Flag, Users, Shield, Clock } from "lucide-react";
 import heroBg from "@/assets/hero-bg.jpg";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, getCountFromServer, getDocs } from "firebase/firestore";
+import { collection, getCountFromServer, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 
 interface RealStats {
   totalUsers: number;
   totalChallenges: number;
   liveEvents: number;
-  totalCompletions: number;
 }
 
 const Hero = () => {
   const [stats, setStats] = useState<RealStats>({
     totalUsers: 0,
     totalChallenges: 0,
-    liveEvents: 0,
-    totalCompletions: 0
+    liveEvents: 0
   });
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
@@ -29,90 +27,41 @@ const Hero = () => {
       const realStats: RealStats = {
         totalUsers: 0,
         totalChallenges: 0,
-        liveEvents: 0,
-        totalCompletions: 0
+        liveEvents: 0
       };
 
-      // 1. Count Users - try multiple collection names silently
-      const userCollections = ['users', 'user', 'members', 'profiles'];
-      for (const collName of userCollections) {
-        try {
-          const snapshot = await getCountFromServer(collection(db, collName));
-          const count = snapshot.data().count;
-          if (count > 0) {
-            realStats.totalUsers = count;
-            break;
-          }
-        } catch (error) {
-          // Silently continue to next collection name
-          continue;
-        }
+      // 1. Count Users - publicly readable
+      try {
+        const snapshot = await getCountFromServer(collection(db, 'users'));
+        realStats.totalUsers = snapshot.data().count;
+      } catch (error) {
+        console.log("Could not count users");
       }
 
-      // 2. Count Challenges
-      const challengeCollections = ['challenges', 'challenge', 'ctfChallenges', 'practice'];
-      for (const collName of challengeCollections) {
-        try {
-          const snapshot = await getCountFromServer(collection(db, collName));
-          const count = snapshot.data().count;
-          if (count > 0) {
-            realStats.totalChallenges = count;
-            break;
-          }
-        } catch (error) {
-          continue;
-        }
+      // 2. Count Active Challenges - now publicly readable
+      try {
+        // Count only active challenges
+        const challengesQuery = query(
+          collection(db, 'challenges'),
+          where('isActive', '==', true)
+        );
+        const snapshot = await getCountFromServer(challengesQuery);
+        realStats.totalChallenges = snapshot.data().count;
+      } catch (error) {
+        console.log("Could not count challenges");
       }
 
-      // 3. Count Events
-      const eventCollections = ['events', 'event', 'liveEvents', 'competitions'];
-      for (const collName of eventCollections) {
-        try {
-          const snapshot = await getCountFromServer(collection(db, collName));
-          const count = snapshot.data().count;
-          if (count > 0) {
-            realStats.liveEvents = count;
-            break;
-          }
-        } catch (error) {
-          continue;
-        }
-      }
-
-      // 4. Count Completions
-      const completionCollections = ['submissions', 'submission', 'solves', 'completions'];
-      for (const collName of completionCollections) {
-        try {
-          const snapshot = await getCountFromServer(collection(db, collName));
-          const count = snapshot.data().count;
-          if (count > 0) {
-            realStats.totalCompletions = count;
-            break;
-          }
-        } catch (error) {
-          continue;
-        }
-      }
-
-      // If no completions collection, calculate from users silently
-      if (realStats.totalCompletions === 0 && realStats.totalUsers > 0) {
-        try {
-          const usersSnapshot = await getDocs(collection(db, 'users'));
-          let totalSolved = 0;
-          usersSnapshot.forEach(doc => {
-            const userData = doc.data();
-            totalSolved += userData.challengesSolved || userData.solvedChallenges || userData.totalSolved || 0;
-          });
-          realStats.totalCompletions = totalSolved;
-        } catch (error) {
-          // Silently fail
-        }
+      // 3. Count Events - now publicly readable
+      try {
+        const snapshot = await getCountFromServer(collection(db, 'events'));
+        realStats.liveEvents = snapshot.data().count;
+      } catch (error) {
+        console.log("Could not count events");
       }
 
       setStats(realStats);
       
     } catch (error) {
-      // Silently handle any errors - don't expose any information
       console.log("Stats loading completed");
     } finally {
       setLoading(false);
@@ -177,8 +126,8 @@ const Hero = () => {
             </Button>
           </div>
 
-          {/* Clean Statistics Display - No Error Messages */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 pt-12 max-w-3xl mx-auto">
+          {/* Real Statistics Display */}
+          <div className="grid grid-cols-3 gap-6 pt-12 max-w-2xl mx-auto">
             <StatCard 
               loading={loading}
               value={stats.totalUsers}
@@ -188,24 +137,18 @@ const Hero = () => {
             <StatCard 
               loading={loading}
               value={stats.totalChallenges}
-              label="Challenges"
+              label="Active Challenges"
               icon={<Shield className="w-5 h-5" />}
             />
             <StatCard 
               loading={loading}
               value={stats.liveEvents}
-              label="Live Events"
+              label="Events"
               icon={<Clock className="w-5 h-5" />}
-            />
-            <StatCard 
-              loading={loading}
-              value={stats.totalCompletions}
-              label="Completions"
-              icon={<Trophy className="w-5 h-5" />}
             />
           </div>
 
-          {/* Simple refresh button - no status messages */}
+          {/* Simple refresh button */}
           {!loading && (
             <div className="mt-4">
               <Button 
