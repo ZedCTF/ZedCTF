@@ -4,7 +4,6 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useEffect, useState } from "react";
 import { db } from "../firebase";
 import { collection, query, orderBy, limit, getDocs } from "firebase/firestore";
-import { useAuthContext } from "../contexts/AuthContext";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -35,7 +34,6 @@ interface LeaderboardProps {
 }
 
 const Leaderboard = ({ eventName = "CTF Competition" }: LeaderboardProps) => {
-  const { user } = useAuthContext();
   const [topUsers, setTopUsers] = useState<TopUser[]>([]);
   const [ctfTeams, setCtfTeams] = useState<CTFTeam[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,12 +42,6 @@ const Leaderboard = ({ eventName = "CTF Competition" }: LeaderboardProps) => {
 
   // Fetch top users from Firestore based on totalPoints
   const fetchLeaderboardData = async () => {
-    if (!user) {
-      setError("Please sign in to view the leaderboard");
-      setLoading(false);
-      return;
-    }
-
     try {
       console.log("Fetching leaderboard data from Firestore...");
       setError("");
@@ -87,7 +79,6 @@ const Leaderboard = ({ eventName = "CTF Competition" }: LeaderboardProps) => {
           rankCounter++;
         }
 
-        // Filter out users with 0 points if you want, but keep them for now
         console.log(`Found ${usersData.length} users for global leaderboard`, usersData);
       } catch (queryError) {
         console.log("Global leaderboard query failed:", queryError);
@@ -195,15 +186,13 @@ const Leaderboard = ({ eventName = "CTF Competition" }: LeaderboardProps) => {
   };
 
   useEffect(() => {
-    if (user) {
-      fetchLeaderboardData(); // Initial fetch
-      
-      // Auto-refresh every 30 seconds
-      const interval = setInterval(fetchLeaderboardData, 30000);
-      
-      return () => clearInterval(interval);
-    }
-  }, [user]);
+    fetchLeaderboardData(); // Initial fetch
+    
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(fetchLeaderboardData, 30000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   if (loading) {
     return (

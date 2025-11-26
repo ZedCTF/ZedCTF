@@ -20,7 +20,6 @@ import Leaderboard from './components/Leaderboard';
 import AdminDashboard from './components/AdminDashboard';
 import ChallengeDetail from './components/ChallengeDetail';
 import Navbar from './components/Navbar';
-import Footer from './components/Footer';
 
 function App() {
   return (
@@ -36,6 +35,10 @@ function App() {
                   <Route path="/login" element={<Login />} />
                   <Route path="/signup" element={<Signup />} />
                   <Route path="/auth/github/callback" element={<GitHubCallback />} />
+                  
+                  {/* Public Routes */}
+                  <Route path="/leaderboard" element={<Leaderboard />} />
+                  <Route path="/writeups" element={<Writeups />} />
                   
                   {/* User-Only Routes (Regular users only) */}
                   <Route 
@@ -64,26 +67,6 @@ function App() {
                       <ProtectedRoute>
                         <UserOnlyRoute>
                           <LiveEvents />
-                        </UserOnlyRoute>
-                      </ProtectedRoute>
-                    } 
-                  />
-                  <Route 
-                    path="/leaderboard" 
-                    element={
-                      <ProtectedRoute>
-                        <UserOnlyRoute>
-                          <Leaderboard />
-                        </UserOnlyRoute>
-                      </ProtectedRoute>
-                    } 
-                  />
-                  <Route 
-                    path="/writeups" 
-                    element={
-                      <ProtectedRoute>
-                        <UserOnlyRoute>
-                          <Writeups />
                         </UserOnlyRoute>
                       </ProtectedRoute>
                     } 
@@ -126,7 +109,6 @@ function App() {
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </main>
-              <Footer /> {/* Only one Footer here */}
             </div>
           </Router>
         </AuthInitializer>
