@@ -818,4 +818,5 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
   );
 };
 
+
 export default ChallengeEdit;

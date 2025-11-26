@@ -32,6 +32,19 @@ const AdminDashboard = () => {
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState("overview");
   const [selectedChallenge, setSelectedChallenge] = useState<any>(null);
+  const [selectedEvent, setSelectedEvent] = useState<any>(null);
+
+  // Handle event creation - redirect to challenge management
+  const handleEventCreated = (eventId: string, eventData: any) => {
+    // Store the created event
+    setSelectedEvent({ id: eventId, ...eventData });
+    
+    // Redirect to Challenge Management for this event
+    setActiveView("challenge-management");
+    
+    // You can pass the event context to ChallengeManagement if needed
+    console.log("Event created, redirecting to challenge management:", eventData);
+  };
 
   // Redirect if not admin/moderator
   if (!isAdmin && !isModerator) {
@@ -84,7 +97,13 @@ const AdminDashboard = () => {
           />
         );
       case "schedule-event":
-        return <EventScheduling onBack={() => setActiveView("overview")} />;
+        return (
+          <EventScheduling 
+            onBack={() => setActiveView("overview")} 
+            userRole={isAdmin ? "admin" : "user"}
+            onEventCreated={handleEventCreated}
+          />
+        );
       case "review-writeups":
         return <WriteupReview onBack={() => setActiveView("overview")} />;
       case "analytics":
@@ -245,6 +264,8 @@ const AdminDashboard = () => {
                 <p className="text-muted-foreground">
                   {activeView === "overview" 
                     ? "Manage your CTF platform, users, challenges, and events"
+                    : activeView === "challenge-management"
+                    ? "Create new challenges or add existing ones to your events"
                     : "Admin management panel"
                   }
                 </p>
@@ -256,6 +277,8 @@ const AdminDashboard = () => {
                   onClick={() => {
                     if (activeView === "create-challenge" || activeView === "edit-challenge") {
                       setActiveView("challenge-management");
+                    } else if (activeView === "challenge-management") {
+                      setActiveView("overview");
                     } else {
                       setActiveView("overview");
                     }
@@ -263,6 +286,8 @@ const AdminDashboard = () => {
                 >
                   {activeView === "create-challenge" || activeView === "edit-challenge" 
                     ? "Back to Challenges" 
+                    : activeView === "challenge-management"
+                    ? "Back to Dashboard"
                     : "Back to Dashboard"
                   }
                 </Button>
@@ -275,6 +300,11 @@ const AdminDashboard = () => {
               }`}>
                 {isAdmin ? 'Administrator' : 'Moderator'}
               </div>
+              {selectedEvent && activeView === "challenge-management" && (
+                <div className="px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800">
+                  Event: {selectedEvent.name}
+                </div>
+              )}
             </div>
           </div>
 

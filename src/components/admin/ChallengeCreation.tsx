@@ -784,4 +784,5 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
   );
 };
 
+
 export default ChallengeCreation;

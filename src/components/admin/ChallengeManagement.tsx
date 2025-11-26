@@ -635,4 +635,5 @@ const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: Challenge
   );
 };
 
+
 export default ChallengeManagement;
