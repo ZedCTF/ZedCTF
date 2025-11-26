@@ -1,7 +1,7 @@
 // src/components/ChallengeDetail.tsx
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { doc, getDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, arrayUnion, increment } from "firebase/firestore";
+import { doc, getDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, arrayUnion, increment, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuthContext } from "../contexts/AuthContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -73,6 +73,20 @@ const ChallengeDetail = () => {
     if (challengeId) {
       fetchChallenge();
       fetchSubmissions();
+      
+      // Real-time listener for challenge updates (solves count)
+      const challengeRef = doc(db, "challenges", challengeId);
+      const unsubscribe = onSnapshot(challengeRef, (doc) => {
+        if (doc.exists()) {
+          const challengeData = {
+            id: doc.id,
+            ...doc.data()
+          } as Challenge;
+          setChallenge(challengeData);
+        }
+      });
+      
+      return () => unsubscribe();
     }
   }, [challengeId]);
 
@@ -217,8 +231,7 @@ const ChallengeDetail = () => {
         });
         setFlagInput("");
         
-        // Refresh challenge to update solved status
-        fetchChallenge();
+        // Refresh submissions
         fetchSubmissions();
       } else {
         setMessage({ type: 'error', text: 'Incorrect flag. Please try again.' });
@@ -383,25 +396,31 @@ const ChallengeDetail = () => {
       <Navbar />
       <div className="min-h-screen bg-background pt-16">
         <div className="container mx-auto px-4 py-6">
-          {/* Header - Only show challenge name */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" onClick={navigateToPractice} size="sm" className="-ml-3">
+          {/* Mobile-optimized header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="ghost" 
+                onClick={navigateToPractice} 
+                size="sm" 
+                className="h-8 px-2 sm:px-3 -ml-2"
+              >
                 <ArrowLeft className="w-3 h-3 mr-1" />
-                Back to Practice
+                <span className="hidden sm:inline">Back to Practice</span>
+                <span className="sm:hidden">Back</span>
               </Button>
-              <h1 className="text-xl font-bold">{challenge.title}</h1>
+              <h1 className="text-lg sm:text-xl font-bold truncate">{challenge.title}</h1>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {isSolved && (
-                <Badge className="bg-green-500/20 text-green-600 border-green-200">
+                <Badge className="bg-green-500/20 text-green-600 border-green-200 text-xs">
                   <CheckCircle className="w-3 h-3 mr-1" />
                   {userReceivedPoints ? 'Solved + Points' : 'Solved'}
                 </Badge>
               )}
               {challenge.featuredOnPractice && (
-                <Badge className="bg-yellow-500/20 text-yellow-600 border-yellow-200">
+                <Badge className="bg-yellow-500/20 text-yellow-600 border-yellow-200 text-xs">
                   <Star className="w-3 h-3 mr-1" />
                   Featured
                 </Badge>
@@ -409,17 +428,17 @@ const ChallengeDetail = () => {
             </div>
           </div>
 
-          {/* Challenge Info Bar */}
+          {/* Mobile-optimized challenge info */}
           <Card className="mb-4 border">
-            <CardContent className="p-3">
-              <div className="flex flex-wrap items-center gap-3 text-xs">
-                <Badge className={getDifficultyColor(challenge.difficulty)}>
+            <CardContent className="p-3 sm:p-4">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <Badge className={`${getDifficultyColor(challenge.difficulty)} text-xs`}>
                   {challenge.difficulty}
                 </Badge>
-                <Badge className={getCategoryColor(challenge.finalCategory || challenge.category)}>
+                <Badge className={`${getCategoryColor(challenge.finalCategory || challenge.category)} text-xs`}>
                   {challenge.finalCategory || challenge.category}
                 </Badge>
-                <Badge variant="outline" className="font-mono font-semibold">
+                <Badge variant="outline" className="font-mono font-semibold text-xs">
                   {challenge.totalPoints || challenge.points} pts
                 </Badge>
                 <div className="flex items-center gap-1 text-muted-foreground">
@@ -428,16 +447,22 @@ const ChallengeDetail = () => {
                 </div>
                 <div className="flex items-center gap-1 text-muted-foreground">
                   <Clock className="w-3 h-3" />
-                  <span>
+                  <span className="hidden sm:inline">
                     {challenge.createdAt?.toDate?.()?.toLocaleDateString() || 
                      new Date(challenge.createdAt).toLocaleDateString()}
                   </span>
+                  <span className="sm:hidden">
+                    {challenge.createdAt?.toDate?.()?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) || 
+                     new Date(challenge.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </span>
                 </div>
-                <div className="text-muted-foreground">
-                  By: {challenge.createdByName || 'Unknown'}
-                </div>
+              </div>
+              
+              {/* Creator info - stacked on mobile */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mt-2 text-xs text-muted-foreground">
+                <div>By: {challenge.createdByName || 'Unknown'}</div>
                 {challenge.originalCreator && (
-                  <div className="flex items-center gap-1 text-muted-foreground">
+                  <div className="flex items-center gap-1">
                     <span>Original: </span>
                     {challenge.originalCreator.url ? (
                       <a 
@@ -458,153 +483,192 @@ const ChallengeDetail = () => {
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* Main Content */}
+          {/* Mobile-optimized main content - Stack tabs vertically on mobile */}
+          <div className="flex flex-col lg:grid lg:grid-cols-3 gap-4">
+            {/* Main Content - Full width on mobile */}
             <div className="lg:col-span-2 space-y-4">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="description" className="text-xs">Description</TabsTrigger>
-                  <TabsTrigger value="hints" className="text-xs">Hints ({challenge.hints?.length || 0})</TabsTrigger>
-                  <TabsTrigger value="files" className="text-xs">
-                    Files & Links ({(challenge.files?.length || 0)})
-                  </TabsTrigger>
-                </TabsList>
-                
-                <TabsContent value="description" className="space-y-3 mt-3">
-                  <Card className="border">
-                    <CardContent className="p-4">
-                      <div className="space-y-3">
-                        {challenge.hasMultipleQuestions && challenge.questions ? (
-                          <div className="space-y-3">
-                            <h3 className="text-lg font-semibold">Questions</h3>
-                            {challenge.questions.map((question, index) => (
-                              <div key={question.id} className="border rounded p-3">
-                                <h4 className="font-semibold text-sm mb-1">Question {index + 1}</h4>
-                                <p className="mb-2 text-xs text-muted-foreground">{question.question}</p>
-                                <div className="flex items-center justify-between text-xs">
-                                  <span className="font-mono font-semibold">{question.points} points</span>
-                                  {challenge.solvedBy?.includes(user?.uid || '') && (
-                                    <Badge variant="outline" className="font-mono text-xs">
-                                      Flag: {question.flag}
-                                    </Badge>
-                                  )}
+              {/* Mobile-optimized tabs with better spacing */}
+              <div className="w-full">
+                {/* Tabs Header - Horizontal scroll on mobile if needed */}
+                <div className="flex overflow-x-auto scrollbar-hide mb-4 bg-muted/30 rounded-lg p-1">
+                  <button
+                    onClick={() => setActiveTab("description")}
+                    className={`flex-1 min-w-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                      activeTab === "description" 
+                        ? "bg-background text-foreground shadow-sm" 
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Description
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("hints")}
+                    className={`flex-1 min-w-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                      activeTab === "hints" 
+                        ? "bg-background text-foreground shadow-sm" 
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Hints ({challenge.hints?.length || 0})
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("files")}
+                    className={`flex-1 min-w-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                      activeTab === "files" 
+                        ? "bg-background text-foreground shadow-sm" 
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Files ({(challenge.files?.length || 0)})
+                  </button>
+                </div>
+
+                {/* Tab Content */}
+                <div className="space-y-4">
+                  {/* Description Tab */}
+                  {activeTab === "description" && (
+                    <Card className="border">
+                      <CardContent className="p-4 sm:p-6">
+                        <div className="space-y-3">
+                          {challenge.hasMultipleQuestions && challenge.questions ? (
+                            <div className="space-y-3">
+                              <h3 className="text-lg font-semibold">Questions</h3>
+                              {challenge.questions.map((question, index) => (
+                                <div key={question.id} className="border rounded p-3">
+                                  <h4 className="font-semibold text-sm mb-1">Question {index + 1}</h4>
+                                  <p className="mb-2 text-xs text-muted-foreground">{question.question}</p>
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="font-mono font-semibold">{question.points} points</span>
+                                    {challenge.solvedBy?.includes(user?.uid || '') && (
+                                      <Badge variant="outline" className="font-mono text-xs">
+                                        Flag: {question.flag}
+                                      </Badge>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {renderChallengeContent()}
+                              
+                              {challenge.flagFormat && (
+                                <div className="p-3 bg-blue-500/10 border border-blue-200 rounded text-xs">
+                                  <p className="text-blue-600">
+                                    <strong>Flag Format:</strong> {challenge.flagFormat}
+                                  </p>
+                                </div>
+                              )}
+                              
+                              {isSolved && challenge.flag && (
+                                <div className="p-3 bg-green-500/10 border border-green-200 rounded">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="text-xs text-green-600 font-mono break-all flex-1">
+                                      <strong>Flag:</strong> {challenge.flag}
+                                    </p>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => copyToClipboard(challenge.flag!)}
+                                      className="h-6 px-2 flex-shrink-0"
+                                    >
+                                      <Copy className="w-3 h-3" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Hints Tab */}
+                  {activeTab === "hints" && (
+                    <Card className="border">
+                      <CardContent className="p-4 sm:p-6">
+                        {challenge.hints && challenge.hints.length > 0 ? (
+                          <div className="space-y-3">
+                            {challenge.hints.map((hint, index) => (
+                              <Card key={index} className="border">
+                                <CardContent className="p-3">
+                                  <div className="flex items-start gap-3">
+                                    <div className="flex-shrink-0 w-6 h-6 bg-primary/10 rounded-full flex items-center justify-center">
+                                      <Lightbulb className="w-3 h-3 text-primary" />
+                                    </div>
+                                    <div className="flex-1">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <span className="font-semibold text-sm">Hint {index + 1}</span>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => toggleHint(index)}
+                                          className="h-6 px-2 text-xs"
+                                        >
+                                          {showHints[index] ? 'Hide' : 'Reveal'}
+                                        </Button>
+                                      </div>
+                                      {showHints[index] && (
+                                        <p className="text-sm text-muted-foreground bg-muted/30 p-3 rounded border">
+                                          {hint}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
                             ))}
                           </div>
                         ) : (
-                          <div className="space-y-3">
-                            {renderChallengeContent()}
-                            
-                            {challenge.flagFormat && (
-                              <div className="p-3 bg-blue-500/10 border border-blue-200 rounded text-xs">
-                                <p className="text-blue-600">
-                                  <strong>Flag Format:</strong> {challenge.flagFormat}
-                                </p>
-                              </div>
-                            )}
-                            
-                            {isSolved && challenge.flag && (
-                              <div className="p-3 bg-green-500/10 border border-green-200 rounded">
-                                <div className="flex items-center justify-between">
-                                  <p className="text-xs text-green-600 font-mono break-all">
-                                    <strong>Flag:</strong> {challenge.flag}
-                                  </p>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => copyToClipboard(challenge.flag!)}
-                                    className="h-6 px-2"
-                                  >
-                                    <Copy className="w-3 h-3" />
-                                  </Button>
-                                </div>
-                              </div>
-                            )}
+                          <div className="text-center py-4">
+                            <p className="text-sm text-muted-foreground">No hints available.</p>
                           </div>
                         )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-                
-                <TabsContent value="hints" className="mt-3">
-                  <Card className="border">
-                    <CardContent className="p-4">
-                      {challenge.hints && challenge.hints.length > 0 ? (
-                        <div className="space-y-2">
-                          {challenge.hints.map((hint, index) => (
-                            <Card key={index} className="border">
-                              <CardContent className="p-3">
-                                <Button
-                                  variant="ghost"
-                                  onClick={() => toggleHint(index)}
-                                  className="w-full justify-between p-0 h-auto hover:bg-transparent"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <Lightbulb className="w-3 h-3" />
-                                    <span className="text-sm">Hint {index + 1}</span>
-                                  </div>
-                                  <div className={`transform transition-transform ${showHints[index] ? 'rotate-180' : ''}`}>
-                                    ↓
-                                  </div>
-                                </Button>
-                                {showHints[index] && (
-                                  <p className="mt-2 text-xs text-muted-foreground pl-5">
-                                    {hint}
-                                  </p>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Files Tab */}
+                  {activeTab === "files" && (
+                    <Card className="border">
+                      <CardContent className="p-4 sm:p-6">
+                        {challenge.files && challenge.files.length > 0 ? (
+                          <div className="space-y-2">
+                            {challenge.files.map((file, index) => (
+                              <a
+                                key={index}
+                                href={file.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 p-3 text-sm border rounded hover:bg-accent transition-colors"
+                              >
+                                {file.type === 'file' ? (
+                                  <FileText className="w-4 h-4" />
+                                ) : (
+                                  <Link className="w-4 h-4" />
                                 )}
-                              </CardContent>
-                            </Card>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-center py-4">
-                          <p className="text-sm text-muted-foreground">No hints available.</p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-                
-                <TabsContent value="files" className="mt-3">
-                  <Card className="border">
-                    <CardContent className="p-4">
-                      {challenge.files && challenge.files.length > 0 ? (
-                        <div className="space-y-2">
-                          {challenge.files.map((file, index) => (
-                            <a
-                              key={index}
-                              href={file.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-2 p-2 text-sm border rounded hover:bg-accent transition-colors"
-                            >
-                              {file.type === 'file' ? (
-                                <FileText className="w-3 h-3" />
-                              ) : (
-                                <Link className="w-3 h-3" />
-                              )}
-                              <span className="flex-1 truncate">{file.name}</span>
-                              <ExternalLink className="w-3 h-3" />
-                            </a>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-center py-4">
-                          <p className="text-sm text-muted-foreground">No files or links available.</p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-              </Tabs>
+                                <span className="flex-1 truncate">{file.name}</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-center py-4">
+                            <p className="text-sm text-muted-foreground">No files or links available.</p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              </div>
             </div>
 
-            {/* Sidebar */}
+            {/* Sidebar - Full width on mobile, sticky on desktop */}
             <div className="space-y-4">
-              {/* Flag Submission */}
-              <Card className="border sticky top-4">
+              {/* Flag Submission - Mobile optimized */}
+              <Card className="border lg:sticky lg:top-4">
                 <CardHeader className="p-4 pb-2">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Flag className="w-4 h-4" />
@@ -672,7 +736,7 @@ const ChallengeDetail = () => {
                 </CardContent>
               </Card>
 
-              {/* Submission History */}
+              {/* Submission History - Mobile optimized */}
               {submissions.length > 0 && (
                 <Card className="border">
                   <CardHeader className="p-4 pb-2">
@@ -688,7 +752,7 @@ const ChallengeDetail = () => {
                             ) : (
                               <XCircle className="w-3 h-3 text-red-600 flex-shrink-0" />
                             )}
-                            <code className="truncate font-mono">{submission.flag}</code>
+                            <code className="truncate font-mono text-xs">{submission.flag}</code>
                             {submission.pointsAwarded && submission.pointsAwarded > 0 && (
                               <Badge variant="outline" className="ml-1 text-xs bg-green-500/10 text-green-600">
                                 +{submission.pointsAwarded}
@@ -696,7 +760,7 @@ const ChallengeDetail = () => {
                             )}
                           </div>
                           <span className="text-muted-foreground flex-shrink-0 ml-1 text-xs">
-                            {submission.submittedAt?.toDate?.()?.toLocaleTimeString() || 
+                            {submission.submittedAt?.toDate?.()?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || 
                              new Date(submission.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
