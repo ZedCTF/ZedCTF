@@ -1,13 +1,14 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Clock, Users, Zap, Calendar, Trophy, Shield } from "lucide-react";
+import { Clock, Users, Zap, Calendar, Crown, CreditCard } from "lucide-react";
 import { useEffect, useState } from "react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
-import { collection, getDocs, query, orderBy, doc, updateDoc, arrayUnion } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, doc, updateDoc, arrayUnion, addDoc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuthContext } from "../contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 interface LiveEvent {
   id: string;
@@ -17,13 +18,15 @@ interface LiveEvent {
   participants: number;
   totalParticipants?: number;
   timeLeft: string;
-  prize: string;
-  difficulty: "Easy" | "Medium" | "Hard" | "Expert";
   startDate: string;
   endDate: string;
-  challengeCount: number;
+  challengeCount?: number;
   registeredUsers?: string[];
   description?: string;
+  createdBy?: "admin" | "user";
+  createdById?: string;
+  hostingFee?: number;
+  hostingPaymentStatus?: "pending" | "paid" | "not_required";
 }
 
 interface UpcomingEvent {
@@ -34,25 +37,41 @@ interface UpcomingEvent {
   startDate: string;
   participants: number;
   totalParticipants?: number;
-  prize: string;
-  difficulty: "Easy" | "Medium" | "Hard" | "Expert";
   registered: boolean;
   maxParticipants?: number;
   maxIndividuals?: number;
   description?: string;
   registeredUsers?: string[];
+  createdBy?: "admin" | "user";
+  hostingFee?: number;
+  challengeCount?: number;
 }
-
-// Base URL for navigation
-const BASE_URL = "/ZedCTF";
 
 const LiveEvents = () => {
   const { user } = useAuthContext();
+  const navigate = useNavigate();
   const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [registering, setRegistering] = useState<string | null>(null);
+  const [processingPayment, setProcessingPayment] = useState(false);
+  const [userRole, setUserRole] = useState<string>("user");
+
+  // Fetch user role from Firestore
+  const fetchUserRole = async () => {
+    if (!user) return;
+    
+    try {
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        setUserRole(userData.role || "user");
+      }
+    } catch (error) {
+      console.error("Error fetching user role:", error);
+      setUserRole("user");
+    }
+  };
 
   // Calculate time left until event starts or ends
   const calculateTimeLeft = (startDate: string, endDate: string): string => {
@@ -61,17 +80,14 @@ const LiveEvents = () => {
     const end = new Date(endDate);
     
     if (now < start) {
-      // Event hasn't started yet - show time until start
       const diff = start.getTime() - now.getTime();
       const hours = Math.floor(diff / (1000 * 60 * 60));
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
       const seconds = Math.floor((diff % (1000 * 60)) / 1000);
       return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     } else if (now > end) {
-      // Event has ended
       return "00:00:00";
     } else {
-      // Event is live - show time until end
       const diff = end.getTime() - now.getTime();
       const hours = Math.floor(diff / (1000 * 60 * 60));
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
@@ -114,12 +130,18 @@ const LiveEvents = () => {
     });
   };
 
+  // Clean event name - remove trailing zeros and trim
+  const cleanEventName = (name: string): string => {
+    if (!name) return "Untitled Event";
+    // Remove trailing zeros and whitespace
+    return name.replace(/0+$/, '').trim();
+  };
+
   // Fetch events from Firestore
   const fetchEventsData = async () => {
     try {
       setError(null);
       
-      // Simple query - no complex where clauses that need indexes
       const eventsQuery = query(
         collection(db, "events"),
         orderBy("startDate", "asc")
@@ -134,48 +156,59 @@ const LiveEvents = () => {
 
       eventsSnapshot.docs.forEach(doc => {
         const data = doc.data();
-        console.log("Event data:", {
-          id: doc.id,
-          name: data.name,
-          registeredUsers: data.registeredUsers,
-          totalParticipants: data.totalParticipants,
-          participants: data.participants
-        });
         
         if (!data.startDate || !data.endDate) {
           console.log("Skipping event - missing dates:", data.name);
           return;
         }
 
-        const eventStatus = getEventStatus(data.startDate, data.endDate);
-        console.log("Event status for", data.name, ":", eventStatus);
+        // Filter approved events on client side instead of query
+        const status = data.status?.toLowerCase();
+        if (status !== 'approved' && status !== 'live' && status !== 'upcoming') {
+          return;
+        }
 
+        const eventStatus = getEventStatus(data.startDate, data.endDate);
+        
         // Skip ended events
         if (eventStatus === "ENDED") {
           return;
         }
 
+        // Clean the event name and title
+        const cleanedName = cleanEventName(data.name);
+        const cleanedTitle = data.title ? cleanEventName(data.title) : undefined;
+
+        console.log("Event data:", {
+          id: doc.id,
+          originalName: data.name,
+          originalTitle: data.title,
+          cleanedName,
+          cleanedTitle,
+          participants: data.totalParticipants || data.participants?.length || 0
+        });
+
         const baseEvent = {
           id: doc.id,
-          name: data.name || "Untitled Event",
-          title: data.title || data.name || "Untitled Event",
+          name: cleanedName,
+          title: cleanedTitle,
           status: eventStatus,
           participants: data.totalParticipants || data.participants?.length || 0,
           timeLeft: calculateTimeLeft(data.startDate, data.endDate),
-          prize: data.prize || `ZMW ${data.individualPrice || 0}`,
-          difficulty: data.difficulty || "Medium",
           startDate: data.startDate,
           endDate: data.endDate,
-          challengeCount: data.challengeCount || 0,
-          registeredUsers: data.registeredUsers || [],
-          description: data.description || "More details coming soon..."
+          challengeCount: data.challengeCount,
+          registeredUsers: data.registeredUsers,
+          description: data.description,
+          createdBy: data.createdBy,
+          createdById: data.createdById,
+          hostingFee: data.hostingFee,
+          hostingPaymentStatus: data.hostingPaymentStatus
         };
 
         if (eventStatus === "LIVE") {
-          console.log("Adding to LIVE events:", data.name);
           liveData.push(baseEvent);
         } else if (eventStatus === "UPCOMING") {
-          console.log("Adding to UPCOMING events:", data.name);
           upcomingData.push({
             ...baseEvent,
             date: `${formatDate(data.startDate)} at ${formatTime(data.startDate)}`,
@@ -186,97 +219,14 @@ const LiveEvents = () => {
         }
       });
 
-      console.log("Final LIVE events:", liveData);
-      console.log("Final UPCOMING events:", upcomingData);
-
       setLiveEvents(liveData);
       setUpcomingEvents(upcomingData);
 
     } catch (err: any) {
       console.error("Error fetching events:", err);
       setError(err.message || "Failed to load events");
-      setLiveEvents([]);
-      setUpcomingEvents([]);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const registerForEvent = async (eventId: string) => {
-    if (!user) {
-      alert("Please log in to register for events");
-      return;
-    }
-
-    setRegistering(eventId);
-
-    try {
-      const eventRef = doc(db, "events", eventId);
-      const event = upcomingEvents.find(e => e.id === eventId);
-      
-      if (!event) {
-        throw new Error("Event not found");
-      }
-
-      console.log("Attempting to register user", user.uid, "for event", eventId);
-      console.log("Current event data:", {
-        registeredUsers: event.registeredUsers,
-        totalParticipants: event.totalParticipants,
-        participants: event.participants
-      });
-
-      // Check if user is already registered
-      if (event.registeredUsers?.includes(user.uid)) {
-        alert("You are already registered for this event");
-        setRegistering(null);
-        return;
-      }
-
-      // Check if event is full
-      if (event.maxParticipants && event.participants >= event.maxParticipants) {
-        alert("This event is full");
-        setRegistering(null);
-        return;
-      }
-
-      // Get current arrays and counts
-      const currentRegisteredUsers = event.registeredUsers || [];
-      const newRegisteredUsers = [...currentRegisteredUsers, user.uid];
-      const currentTotalParticipants = event.totalParticipants || event.participants || 0;
-
-      console.log("Updating with:", {
-        registeredUsers: newRegisteredUsers,
-        totalParticipants: currentTotalParticipants + 1
-      });
-
-      // Update the event document - this matches the security rules
-      await updateDoc(eventRef, {
-        registeredUsers: newRegisteredUsers,
-        totalParticipants: currentTotalParticipants + 1
-      });
-
-      console.log("Registration successful!");
-
-      // Refresh events data to update registration status
-      await fetchEventsData();
-      
-      alert("🎉 Successfully registered for the event!");
-      
-    } catch (error: any) {
-      console.error('Failed to register for event:', error);
-      console.error('Error code:', error.code);
-      console.error('Error message:', error.message);
-      
-      if (error.code === 'permission-denied') {
-        alert("❌ Permission denied. Please check if you're logged in and have proper permissions.");
-        console.log("Security rules blocked the update. Check if user has proper role.");
-      } else if (error.code === 'not-found') {
-        alert("❌ Event not found. Please try again.");
-      } else {
-        alert(`❌ Failed to register for event: ${error.message}`);
-      }
-    } finally {
-      setRegistering(null);
     }
   };
 
@@ -287,36 +237,82 @@ const LiveEvents = () => {
     }
 
     try {
-      const eventRef = doc(db, "events", eventId);
       const event = liveEvents.find(e => e.id === eventId);
       
       if (!event) {
         throw new Error("Event not found");
       }
 
-      // For live events, increment participant count when joining
-      await updateDoc(eventRef, {
-        totalParticipants: (event.participants || 0) + 1
-      });
+      if (!event.registeredUsers?.includes(user.uid)) {
+        alert("You need to register for this event first before joining");
+        return;
+      }
 
-      // Redirect to competition page with base URL
-      window.location.href = `${BASE_URL}/competition/${eventId}`;
+      navigate(`/competition/${eventId}`);
     } catch (error: any) {
       console.error('Failed to join live event:', error);
       alert(`Failed to join event: ${error.message}`);
     }
   };
 
-  const navigateToPractice = () => {
-    window.location.href = `${BASE_URL}/practice`;
+  const navigateToAdmin = () => {
+    navigate("/admin");
+  };
+
+  const navigateToEventScheduling = () => {
+    navigate("/admin?tab=events");
+  };
+
+  const navigateToEventDetails = (eventId: string) => {
+    navigate(`/event/${eventId}`);
+  };
+
+  // Process Flutterwave payment for event hosting
+  const processHostingPayment = async () => {
+    if (!user) return;
+    
+    setProcessingPayment(true);
+
+    try {
+      // Create hosting request in Firestore with pending status
+      const hostRequestRef = await addDoc(collection(db, "hostRequests"), {
+        userId: user.uid,
+        userEmail: user.email,
+        userName: user.displayName || user.email,
+        hostingFee: 5,
+        status: "pending_payment",
+        submittedAt: new Date(),
+        paymentMethod: "flutterwave_mobile_money",
+        type: "event_hosting"
+      });
+
+      // Simulate payment processing
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Update the host request to paid status
+      await updateDoc(hostRequestRef, {
+        status: "paid",
+        paidAt: new Date()
+      });
+
+      // Redirect to event scheduling after successful payment
+      navigate("/admin?tab=events&hosting_paid=true");
+      
+    } catch (error) {
+      console.error("Payment processing error:", error);
+      alert("Payment failed. Please try again.");
+    } finally {
+      setProcessingPayment(false);
+    }
   };
 
   useEffect(() => {
-    fetchEventsData(); // Initial fetch
+    fetchEventsData();
+    if (user) {
+      fetchUserRole();
+    }
     
-    // Auto-refresh every 30 seconds for live events
     const interval = setInterval(fetchEventsData, 30000);
-    
     return () => clearInterval(interval);
   }, [user]);
 
@@ -335,7 +331,7 @@ const LiveEvents = () => {
     );
   }
 
-  const currentLiveEvent = liveEvents[0]; // Get the first live event
+  const currentLiveEvent = liveEvents[0];
 
   return (
     <>
@@ -360,10 +356,79 @@ const LiveEvents = () => {
           <div className="mb-12 text-center">
             <Zap className="w-16 h-16 text-primary mx-auto mb-4" />
             <h2 className="text-4xl font-bold mb-4">
-              <span className="text-primary">LIVE</span> Events
+              <span className="text-primary">LIVE</span> CTF Events
             </h2>
             <p className="text-muted-foreground">Compete in real-time for prizes</p>
           </div>
+
+          {/* Host Event Section for Regular Users */}
+          {user && (
+            <Card className="max-w-4xl mx-auto mb-8 border-primary/20 bg-gradient-to-br from-primary/5 to-primary/10">
+              <CardContent className="p-6">
+                <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <Crown className="w-8 h-8 text-primary" />
+                    <div>
+                      <h3 className="font-bold text-lg">Want to Host Your Own Event?</h3>
+                      <p className="text-muted-foreground text-sm">
+                        Submit a hosting request and get access to event management tools
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button 
+                      onClick={processHostingPayment}
+                      disabled={processingPayment}
+                      className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                    >
+                      <CreditCard className="w-4 h-4 mr-2" />
+                      {processingPayment ? "Processing..." : "Get Hosting Access - 5 ZMW"}
+                    </Button>
+                    {userRole === 'admin' && (
+                      <Button onClick={navigateToAdmin} variant="outline">
+                        <Crown className="w-4 h-4 mr-2" />
+                        Admin Dashboard
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Hosting Access Info */}
+                <div className="mt-4 p-4 bg-background/50 rounded-lg border border-border">
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="font-medium text-foreground">Event Hosting Fee:</span>
+                    <span className="text-lg font-bold text-primary">ZMW 5</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Pay 5 ZMW via Mobile Money to unlock event hosting capabilities for your event and get access to:
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-foreground">
+                    <p className="flex items-center gap-2">
+                      <span className="w-2 h-2 bg-primary rounded-full"></span>
+                      Challenge Creation Tools
+                    </p>
+                    <p className="flex items-center gap-2">
+                      <span className="w-2 h-2 bg-primary rounded-full"></span>
+                      Event Scheduling
+                    </p>
+                    <p className="flex items-center gap-2">
+                      <span className="w-2 h-2 bg-primary rounded-full"></span>
+                      Challenge Management
+                    </p>
+                    <p className="flex items-center gap-2">
+                      <span className="w-2 h-2 bg-primary rounded-full"></span>
+                      Event Management
+                    </p>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-border">
+                    <p className="text-xs text-muted-foreground">
+                      Note: This payment grants hosting access for a single event. Each event requires its own hosting payment.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Live Event Card */}
           {currentLiveEvent ? (
@@ -375,7 +440,12 @@ const LiveEvents = () => {
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
                     </span>
-                    {currentLiveEvent.title}
+                    {currentLiveEvent.title || currentLiveEvent.name}
+                    {currentLiveEvent.createdBy === 'user' && (
+                      <Badge variant="outline" className="ml-2">
+                        Community Hosted
+                      </Badge>
+                    )}
                   </CardTitle>
                   <Badge className="bg-primary text-primary-foreground font-bold px-4 py-1">
                     LIVE NOW
@@ -395,14 +465,16 @@ const LiveEvents = () => {
                     <div className="text-sm text-muted-foreground">Active Players</div>
                   </div>
                   <div className="text-center">
-                    <Trophy className="w-8 h-8 text-primary mx-auto mb-2" />
-                    <div className="text-2xl font-bold">{currentLiveEvent.prize}</div>
-                    <div className="text-sm text-muted-foreground">Prize Pool</div>
+                    <Zap className="w-8 h-8 text-primary mx-auto mb-2" />
+                    <div className="text-2xl font-bold">{currentLiveEvent.challengeCount || 0}</div>
+                    <div className="text-sm text-muted-foreground">Challenges</div>
                   </div>
                   <div className="text-center">
-                    <Zap className="w-8 h-8 text-secondary mx-auto mb-2" />
-                    <div className="text-2xl font-bold">{currentLiveEvent.difficulty}</div>
-                    <div className="text-sm text-muted-foreground">Difficulty</div>
+                    <Calendar className="w-8 h-8 text-secondary mx-auto mb-2" />
+                    <div className="text-2xl font-bold">
+                      {formatTime(currentLiveEvent.endDate)}
+                    </div>
+                    <div className="text-sm text-muted-foreground">Ends At</div>
                   </div>
                 </div>
                 {currentLiveEvent.description && (
@@ -427,44 +499,36 @@ const LiveEvents = () => {
                 <Zap className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-50" />
                 <h3 className="text-xl font-bold mb-2">No Live Events</h3>
                 <p className="text-muted-foreground">Check back later for upcoming competitions</p>
-                
-                {/* Practice Section Call-to-Action */}
-                <div className="mt-6 pt-6 border-t border-border">
-                  <Shield className="w-12 h-12 text-primary mx-auto mb-3" />
-                  <h4 className="text-lg font-semibold mb-2">Want to Practice?</h4>
-                  <p className="text-muted-foreground mb-4">
-                    Sharpen your skills with our practice challenges while you wait for the next live event.
-                  </p>
-                  <Button 
-                    variant="terminal" 
-                    onClick={navigateToPractice}
-                  >
-                    <Shield className="w-4 h-4 mr-2" />
-                    Explore Practice Challenges
-                  </Button>
-                </div>
               </CardContent>
             </Card>
           )}
 
-          {/* Additional Live Events (if any) */}
+          {/* Additional Live Events */}
           {liveEvents.length > 1 && (
             <div className="max-w-4xl mx-auto mb-8">
               <h3 className="text-2xl font-bold mb-6">Other Live Events</h3>
               <div className="space-y-4">
                 {liveEvents.slice(1).map((event) => (
-                  <Card key={event.id} className="border-primary/30 hover:border-primary/50 transition-all">
+                  <Card 
+                    key={event.id} 
+                    className="border-primary/30 hover:border-primary/50 cursor-pointer transition-colors"
+                    onClick={() => navigateToEventDetails(event.id)}
+                  >
                     <CardContent className="p-6">
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-3">
-                            <h4 className="font-bold text-xl">{event.title}</h4>
-                            <Badge className="bg-primary/20 text-primary font-bold">
-                              LIVE
-                            </Badge>
-                            <Badge variant="outline" className="border-primary/30 text-primary">
-                              {event.difficulty}
-                            </Badge>
+                          <div className="mb-3">
+                            <h4 className="font-bold text-xl mb-2">{event.title || event.name}</h4>
+                            <div className="flex items-center gap-2">
+                              <Badge className="bg-primary/20 text-primary font-bold">
+                                LIVE
+                              </Badge>
+                              {event.createdBy === 'user' && (
+                                <Badge variant="secondary">
+                                  Community Hosted
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                             <div className="flex items-center gap-2">
@@ -475,23 +539,17 @@ const LiveEvents = () => {
                               <Users className="w-4 h-4" />
                               {event.participants} players
                             </div>
-                            <div className="flex items-center gap-2">
-                              <Trophy className="w-4 h-4" />
-                              Prize: {event.prize}
-                            </div>
+                            {event.challengeCount !== undefined && event.challengeCount > 0 && (
+                              <div className="flex items-center gap-2">
+                                <Zap className="w-4 h-4" />
+                                {event.challengeCount} challenges
+                              </div>
+                            )}
                           </div>
                           {event.description && (
                             <p className="text-sm text-muted-foreground mt-2">{event.description}</p>
                           )}
                         </div>
-                        <Button 
-                          variant="terminal"
-                          className="md:ml-4"
-                          onClick={() => joinLiveEvent(event.id)}
-                        >
-                          <Zap className="w-4 h-4 mr-2" />
-                          Join Now
-                        </Button>
                       </div>
                     </CardContent>
                   </Card>
@@ -513,20 +571,28 @@ const LiveEvents = () => {
             ) : (
               <div className="space-y-4">
                 {upcomingEvents.map((event) => (
-                  <Card key={event.id} className="border-border hover:border-primary/30 transition-all">
+                  <Card 
+                    key={event.id} 
+                    className="border-border hover:border-primary/30 cursor-pointer transition-colors"
+                    onClick={() => navigateToEventDetails(event.id)}
+                  >
                     <CardContent className="p-6">
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-3">
-                            <h4 className="font-bold text-xl">{event.title}</h4>
-                            <Badge variant="outline" className="border-primary/30 text-primary">
-                              {event.difficulty}
-                            </Badge>
-                            {event.maxParticipants && event.participants >= event.maxParticipants && (
-                              <Badge variant="secondary" className="bg-destructive/10 text-destructive">
-                                FULL
-                              </Badge>
-                            )}
+                          <div className="mb-3">
+                            <h4 className="font-bold text-xl mb-2">{event.title || event.name}</h4>
+                            <div className="flex items-center gap-2">
+                              {event.createdBy === 'user' && (
+                                <Badge variant="secondary">
+                                  Community Hosted
+                                </Badge>
+                              )}
+                              {event.maxParticipants && event.participants >= event.maxParticipants && (
+                                <Badge variant="secondary" className="bg-destructive/10 text-destructive">
+                                  FULL
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                             <div className="flex items-center gap-2">
@@ -535,62 +601,26 @@ const LiveEvents = () => {
                             </div>
                             <div className="flex items-center gap-2">
                               <Users className="w-4 h-4" />
-                              {event.participants} registered
-                              {event.maxParticipants && ` / ${event.maxParticipants} max`}
+                              {event.participants > 0 ? `${event.participants} registered` : 'No registrations yet'}
+                              {event.maxParticipants && event.maxParticipants > 0 && ` / ${event.maxParticipants} max`}
                             </div>
-                            <div className="flex items-center gap-2">
-                              <Trophy className="w-4 h-4" />
-                              Prize: {event.prize}
-                            </div>
+                            {event.challengeCount !== undefined && event.challengeCount > 0 && (
+                              <div className="flex items-center gap-2">
+                                <Zap className="w-4 h-4" />
+                                {event.challengeCount} challenges
+                              </div>
+                            )}
                           </div>
                           {event.description && (
                             <p className="text-sm text-muted-foreground mt-2">{event.description}</p>
                           )}
                         </div>
-                        <Button 
-                          variant={event.registered ? "outline" : "terminal"}
-                          className="md:ml-4 whitespace-nowrap"
-                          onClick={() => !event.registered && registerForEvent(event.id)}
-                          disabled={event.registered || (event.maxParticipants ? event.participants >= event.maxParticipants : false) || registering === event.id}
-                        >
-                          {registering === event.id ? (
-                            "Registering..."
-                          ) : event.registered ? (
-                            "Registered ✓"
-                          ) : event.maxParticipants && event.participants >= event.maxParticipants ? (
-                            "Event Full"
-                          ) : (
-                            "Register"
-                          )}
-                        </Button>
                       </div>
                     </CardContent>
                   </Card>
                 ))}
               </div>
             )}
-          </div>
-
-          {/* Practice Section Call-to-Action */}
-          <div className="max-w-4xl mx-auto mt-16">
-            <Card className="bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
-              <CardContent className="p-8 text-center">
-                <Shield className="w-16 h-16 text-primary mx-auto mb-4" />
-                <h3 className="text-2xl font-bold mb-2">Ready to Practice?</h3>
-                <p className="text-muted-foreground mb-6 max-w-2xl mx-auto">
-                  Access our extensive library of practice challenges covering web security, cryptography, 
-                  forensics, and more. Perfect for beginners and experts alike.
-                </p>
-                <Button 
-                  variant="terminal" 
-                  size="lg"
-                  onClick={navigateToPractice}
-                >
-                  <Shield className="w-5 h-5 mr-2" />
-                  Explore Practice Challenges
-                </Button>
-              </CardContent>
-            </Card>
           </div>
         </div>
       </section>

@@ -1,4 +1,3 @@
-// src/App.tsx
 import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { AdminProvider } from './contexts/AdminContext';
@@ -19,6 +18,7 @@ import LiveEvents from './components/LiveEvents';
 import Leaderboard from './components/Leaderboard';
 import AdminDashboard from './components/AdminDashboard';
 import ChallengeDetail from './components/ChallengeDetail';
+import EventDetails from './components/EventDetails';
 import Navbar from './components/Navbar';
 
 function App() {
@@ -89,6 +89,18 @@ function App() {
                       <ProtectedRoute>
                         <UserOnlyRoute>
                           <ChallengeDetail />
+                        </UserOnlyRoute>
+                      </ProtectedRoute>
+                    } 
+                  />
+                  
+                  {/* Event Details Route - User only */}
+                  <Route 
+                    path="/event/:eventId" 
+                    element={
+                      <ProtectedRoute>
+                        <UserOnlyRoute>
+                          <EventDetails />
                         </UserOnlyRoute>
                       </ProtectedRoute>
                     } 
