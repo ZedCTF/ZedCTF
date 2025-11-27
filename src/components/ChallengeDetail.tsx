@@ -261,6 +261,71 @@ const ChallengeDetail = () => {
 
   const isSolved = challenge?.solvedBy?.includes(user?.uid || '');
 
+  // Function to render challenge content with proper formatting
+  const renderChallengeContent = () => {
+    if (!challenge.description) return null;
+
+    const lines = challenge.description.split('\n');
+    const content = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      if (line.startsWith('n =') || line.startsWith('e =') || line.startsWith('c =')) {
+        // Handle crypto parameters with copy buttons
+        const [key, ...valueParts] = line.split('=');
+        const value = valueParts.join('=').trim();
+        
+        content.push(
+          <div key={i} className="mb-3 p-3 bg-muted/30 border rounded-lg">
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-mono font-semibold text-xs">{key}=</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => copyToClipboard(value)}
+                className="h-6 px-2"
+              >
+                <Copy className="w-3 h-3" />
+              </Button>
+            </div>
+            <div className="font-mono text-xs bg-background p-2 rounded border break-all overflow-x-auto">
+              <pre className="whitespace-pre-wrap break-words m-0">{value}</pre>
+            </div>
+          </div>
+        );
+      } else if (line.includes('=') && line.length > 50) {
+        // Handle other long key-value pairs
+        const [key, ...valueParts] = line.split('=');
+        const value = valueParts.join('=').trim();
+        
+        content.push(
+          <div key={i} className="mb-2">
+            <strong className="text-sm">{key}=</strong>
+            <div className="font-mono text-xs bg-muted/30 p-2 rounded border break-all overflow-x-auto mt-1">
+              <pre className="whitespace-pre-wrap break-words m-0">{value}</pre>
+            </div>
+          </div>
+        );
+      } else if (line) {
+        // Regular text
+        content.push(
+          <p key={i} className="mb-2 text-sm leading-relaxed break-words">
+            {line}
+          </p>
+        );
+      } else {
+        // Empty line (paragraph break)
+        content.push(<div key={i} className="mb-2" />);
+      }
+    }
+
+    return content;
+  };
+
+  // Calculate if user received points for this solve
+  const userReceivedPoints = submissions.some(sub => sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0);
+
   if (loading) {
     return (
       <>
@@ -325,71 +390,6 @@ const ChallengeDetail = () => {
     };
     return colors[category] || "bg-gray-500/20 text-gray-600 border-gray-200";
   };
-
-  // Function to render challenge content with proper formatting
-  const renderChallengeContent = () => {
-    if (!challenge.description) return null;
-
-    const lines = challenge.description.split('\n');
-    const content = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      
-      if (line.startsWith('n =') || line.startsWith('e =') || line.startsWith('c =')) {
-        // Handle crypto parameters with copy buttons
-        const [key, ...valueParts] = line.split('=');
-        const value = valueParts.join('=').trim();
-        
-        content.push(
-          <div key={i} className="mb-3 p-3 bg-muted/30 border rounded-lg">
-            <div className="flex items-center justify-between mb-1">
-              <span className="font-mono font-semibold text-xs">{key}=</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => copyToClipboard(value)}
-                className="h-6 px-2"
-              >
-                <Copy className="w-3 h-3" />
-              </Button>
-            </div>
-            <div className="font-mono text-xs bg-background p-2 rounded border break-all">
-              {value}
-            </div>
-          </div>
-        );
-      } else if (line.includes('=') && line.length > 50) {
-        // Handle other long key-value pairs
-        const [key, ...valueParts] = line.split('=');
-        const value = valueParts.join('=').trim();
-        
-        content.push(
-          <div key={i} className="mb-2">
-            <strong className="text-sm">{key}=</strong>
-            <div className="font-mono text-xs bg-muted/30 p-2 rounded border break-all mt-1">
-              {value}
-            </div>
-          </div>
-        );
-      } else if (line) {
-        // Regular text
-        content.push(
-          <p key={i} className="mb-2 text-sm leading-relaxed">
-            {line}
-          </p>
-        );
-      } else {
-        // Empty line (paragraph break)
-        content.push(<div key={i} className="mb-2" />);
-      }
-    }
-
-    return content;
-  };
-
-  // Calculate if user received points for this solve
-  const userReceivedPoints = submissions.some(sub => sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0);
 
   return (
     <>
@@ -536,7 +536,7 @@ const ChallengeDetail = () => {
                               {challenge.questions.map((question, index) => (
                                 <div key={question.id} className="border rounded p-3">
                                   <h4 className="font-semibold text-sm mb-1">Question {index + 1}</h4>
-                                  <p className="mb-2 text-xs text-muted-foreground">{question.question}</p>
+                                  <p className="mb-2 text-xs text-muted-foreground break-words">{question.question}</p>
                                   <div className="flex items-center justify-between text-xs">
                                     <span className="font-mono font-semibold">{question.points} points</span>
                                     {challenge.solvedBy?.includes(user?.uid || '') && (
@@ -549,19 +549,19 @@ const ChallengeDetail = () => {
                               ))}
                             </div>
                           ) : (
-                            <div className="space-y-3">
+                            <div className="space-y-3 break-words">
                               {renderChallengeContent()}
                               
                               {challenge.flagFormat && (
                                 <div className="p-3 bg-blue-500/10 border border-blue-200 rounded text-xs">
-                                  <p className="text-blue-600">
+                                  <p className="text-blue-600 break-words">
                                     <strong>Flag Format:</strong> {challenge.flagFormat}
                                   </p>
                                 </div>
                               )}
                               
                               {isSolved && challenge.flag && (
-                                <div className="p-3 bg-green-500/10 border border-green-200 rounded">
+                                <div className="p-3 bg-green-500/10 border border-green-200 rounded break-words">
                                   <div className="flex items-center justify-between gap-2">
                                     <p className="text-xs text-green-600 font-mono break-all flex-1">
                                       <strong>Flag:</strong> {challenge.flag}
@@ -610,7 +610,7 @@ const ChallengeDetail = () => {
                                         </Button>
                                       </div>
                                       {showHints[index] && (
-                                        <p className="text-sm text-muted-foreground bg-muted/30 p-3 rounded border">
+                                        <p className="text-sm text-muted-foreground bg-muted/30 p-3 rounded border break-words">
                                           {hint}
                                         </p>
                                       )}
