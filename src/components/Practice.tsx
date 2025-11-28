@@ -101,7 +101,7 @@ const Practice = () => {
 
   const generateCategories = (challenges: Challenge[]) => {
     const categoryMap = new Map<string, number>();
-    
+
     challenges.forEach(challenge => {
       const category = challenge.finalCategory || challenge.category;
       categoryMap.set(category, (categoryMap.get(category) || 0) + 1);
@@ -146,7 +146,7 @@ const Practice = () => {
         icon: "📁",
         description: "Various security challenges"
       };
-      
+
       return {
         name,
         count,
@@ -228,6 +228,14 @@ const Practice = () => {
     setShowFilters(false);
   };
 
+  // Calculate the number of challenges the current user has solved
+  const mySolvesCount = challenges.reduce((sum, challenge) => {
+    // Check if the current user's ID is in the solvedBy array
+    const isSolvedByMe = challenge.solvedBy?.includes(user?.uid as string) || false;
+    // Add 1 to the count if the user solved it, otherwise add 0
+    return sum + (isSolvedByMe ? 1 : 0);
+  }, 0);
+
   if (loading) {
     return (
       <>
@@ -261,7 +269,7 @@ const Practice = () => {
             <p className="text-sm sm:text-xl text-muted-foreground max-w-2xl mx-auto mb-4">
               Master your cybersecurity skills with hands-on challenges
             </p>
-            
+
             {/* Error Display */}
             {error && (
               <Card className="max-w-2xl mx-auto mb-4 border-red-200 bg-red-50">
@@ -282,14 +290,18 @@ const Practice = () => {
                   <div className="text-xs sm:text-sm text-muted-foreground">Challenges</div>
                 </CardContent>
               </Card>
+              {/* === START MODIFIED SECTION === */}
               <Card className="text-center border">
                 <CardContent className="p-2 sm:p-4">
                   <div className="text-lg sm:text-2xl font-bold text-green-600">
-                    {challenges.reduce((sum, challenge) => sum + (challenge.solvedBy?.length || 0), 0)}
+                    {/* Changed calculation to use mySolvesCount */}
+                    {mySolvesCount}
                   </div>
-                  <div className="text-xs sm:text-sm text-muted-foreground">Solves</div>
+                  {/* Changed label from "Solves" to "My Solves" */}
+                  <div className="text-xs sm:text-sm text-muted-foreground"> My Solves</div> 
                 </CardContent>
               </Card>
+              {/* === END MODIFIED SECTION === */}
               <Card className="text-center border">
                 <CardContent className="p-2 sm:p-4">
                   <div className="text-lg sm:text-2xl font-bold text-blue-600">{categories.length}</div>
@@ -460,7 +472,7 @@ const Practice = () => {
                             {getDifficultyText(challenge.difficulty)}
                           </Badge>
                         </div>
-                        
+
                         <p className="text-muted-foreground text-sm mb-3 sm:mb-4 line-clamp-2">
                           {challenge.description}
                         </p>

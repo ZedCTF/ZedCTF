@@ -1,6 +1,6 @@
 // src/components/admin/ChallengeCreation.tsx
-import { useState } from "react";
-import { collection, addDoc } from "firebase/firestore";
+import { useState, useEffect } from "react";
+import { collection, addDoc, getDocs, query, where, orderBy } from "firebase/firestore";
 import { db } from "../../firebase";
 import { useAuthContext } from "../../contexts/AuthContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,10 +10,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { X, Plus, Upload, Link, FileText, User, ExternalLink, Star, Shield } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { X, Plus, Upload, Link, FileText, User, ExternalLink, Star, Shield, Calendar, Users } from "lucide-react";
 
 interface ChallengeCreationProps {
   onBack: () => void;
+  onChallengeCreated: (challengeId: string) => void;
+  eventId?: string; // Pre-selected event ID
+  eventName?: string; // Pre-selected event name
 }
 
 interface Question {
@@ -38,8 +42,21 @@ interface ExternalSource {
   license: string;
 }
 
-const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
+interface Event {
+  id: string;
+  name: string;
+  title?: string;
+  startDate: string;
+  endDate: string;
+  status?: string;
+  participants?: string[];
+}
+
+const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: ChallengeCreationProps) => {
   const { user } = useAuthContext();
+  const [events, setEvents] = useState<Event[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+  
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -62,7 +79,10 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
       authorUrl: "",
       license: "unknown"
     } as ExternalSource,
-    // NEW: Practice-related fields
+    // Event assignment fields
+    eventAssignment: "practice" as "practice" | "specific_event",
+    selectedEventId: eventId || "",
+    // Practice-related fields
     featuredOnPractice: false,
     availableInPractice: true,
     challengeType: 'practice' as 'practice' | 'live' | 'past_event'
@@ -75,11 +95,69 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
   const [loading, setLoading] = useState(false);
   const [showCustomCategory, setShowCustomCategory] = useState(false);
 
+  // Fetch available events
+  useEffect(() => {
+    fetchEvents();
+    
+    // If eventId is provided, pre-select that event
+    if (eventId) {
+      setFormData(prev => ({
+        ...prev,
+        eventAssignment: "specific_event",
+        selectedEventId: eventId
+      }));
+    }
+  }, [eventId]);
+
+  const fetchEvents = async () => {
+    try {
+      setLoadingEvents(true);
+      
+      // Get upcoming and live events that the user can assign challenges to
+      const eventsQuery = query(
+        collection(db, "events"),
+        orderBy("startDate", "desc")
+      );
+
+      const eventsSnapshot = await getDocs(eventsQuery);
+      const eventsData: Event[] = [];
+
+      eventsSnapshot.forEach(doc => {
+        const data = doc.data();
+        const event = {
+          id: doc.id,
+          ...data
+        } as Event;
+
+        eventsData.push(event);
+      });
+
+      setEvents(eventsData);
+    } catch (error: any) {
+      console.error("Error fetching events:", error);
+    } finally {
+      setLoadingEvents(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     
     try {
+      // Determine event assignment
+      const eventIdToAssign = formData.eventAssignment === "specific_event" 
+        ? formData.selectedEventId 
+        : null;
+
+      // Determine challenge type based on event assignment
+      let challengeType = formData.challengeType;
+      if (eventIdToAssign) {
+        challengeType = 'live'; // If assigned to an event, it's a live challenge
+      } else if (formData.challengeType === 'live') {
+        challengeType = 'practice'; // Can't have live challenge without event
+      }
+
       const challengeData = {
         ...formData,
         // Use custom category if selected, otherwise use predefined category
@@ -89,6 +167,8 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
         isActive: true,
         solvedBy: [],
         hints: formData.hints.filter(hint => hint.trim() !== ""),
+        // Event assignment
+        eventId: eventIdToAssign,
         // Calculate total points for multi-question challenges
         totalPoints: formData.hasMultipleQuestions 
           ? questions.reduce((sum, q) => sum + q.points, 0)
@@ -96,10 +176,10 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
         // Creator information
         createdBy: user?.uid,
         createdByName: user?.displayName || user?.email,
-        // NEW: Include practice fields
+        // Practice fields
         featuredOnPractice: formData.featuredOnPractice,
         availableInPractice: formData.availableInPractice,
-        challengeType: formData.challengeType,
+        challengeType: challengeType,
         // If it's an external challenge, include attribution
         ...(formData.isExternalChallenge && {
           attribution: {
@@ -118,9 +198,16 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
         })
       };
 
-      await addDoc(collection(db, "challenges"), challengeData);
+      const docRef = await addDoc(collection(db, "challenges"), challengeData);
       
-      alert("Challenge created successfully!");
+      // Show success message with assignment info
+      const assignedEvent = events.find(e => e.id === eventIdToAssign);
+      const successMessage = assignedEvent 
+        ? `Challenge created successfully and assigned to "${assignedEvent.title || assignedEvent.name}"!`
+        : "Challenge created successfully for practice!";
+      
+      alert(successMessage);
+      onChallengeCreated(docRef.id);
       resetForm();
     } catch (error) {
       console.error("Error creating challenge:", error);
@@ -153,7 +240,8 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
         authorUrl: "",
         license: "unknown"
       },
-      // NEW: Reset practice fields
+      eventAssignment: eventId ? "specific_event" : "practice",
+      selectedEventId: eventId || "",
       featuredOnPractice: false,
       availableInPractice: true,
       challengeType: 'practice'
@@ -267,16 +355,164 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
     });
   };
 
+  const formatDate = (dateString: string): string => {
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } catch {
+      return "Invalid date";
+    }
+  };
+
+  const getEventStatus = (startDate: string, endDate: string): string => {
+    try {
+      const now = new Date();
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+
+      if (now < start) return "UPCOMING";
+      if (now > end) return "ENDED";
+      return "LIVE";
+    } catch {
+      return "UPCOMING";
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "LIVE": return "bg-green-500/20 text-green-600";
+      case "UPCOMING": return "bg-blue-500/20 text-blue-600";
+      case "ENDED": return "bg-gray-500/20 text-gray-600";
+      default: return "bg-gray-500/20 text-gray-600";
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Create New Challenge</CardTitle>
         <CardDescription>
-          Add a new CTF challenge to the platform with advanced options
+          Add a new CTF challenge to the platform. Assign to an event or keep it for practice.
+          {eventName && (
+            <Badge variant="secondary" className="ml-2">
+              Pre-selected: {eventName}
+            </Badge>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Event Assignment Section */}
+          <div className="space-y-4 p-4 border rounded-lg bg-blue-50/50">
+            <div className="flex items-center space-x-2">
+              <Calendar className="w-5 h-5 text-blue-600" />
+              <Label className="text-base text-blue-900">Event Assignment</Label>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="radio"
+                    id="practice"
+                    name="eventAssignment"
+                    checked={formData.eventAssignment === "practice"}
+                    onChange={() => setFormData({...formData, eventAssignment: "practice"})}
+                    className="text-blue-600"
+                  />
+                  <Label htmlFor="practice" className="text-sm font-medium">
+                    Practice Challenge (No Event)
+                  </Label>
+                </div>
+                
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="radio"
+                    id="specific_event"
+                    name="eventAssignment"
+                    checked={formData.eventAssignment === "specific_event"}
+                    onChange={() => setFormData({...formData, eventAssignment: "specific_event"})}
+                    className="text-blue-600"
+                  />
+                  <Label htmlFor="specific_event" className="text-sm font-medium">
+                    Assign to Specific Event
+                  </Label>
+                </div>
+              </div>
+
+              {formData.eventAssignment === "specific_event" && (
+                <div className="space-y-3">
+                  <Label htmlFor="eventSelect">Select Event</Label>
+                  {loadingEvents ? (
+                    <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                      <div className="animate-spin w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+                      <span>Loading events...</span>
+                    </div>
+                  ) : events.length === 0 ? (
+                    <div className="text-sm text-muted-foreground p-3 border rounded bg-white">
+                      No events available for assignment.
+                    </div>
+                  ) : (
+                    <Select 
+                      value={formData.selectedEventId} 
+                      onValueChange={(value) => setFormData({...formData, selectedEventId: value})}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select an event..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {events.map((event) => {
+                          const status = getEventStatus(event.startDate, event.endDate);
+                          return (
+                            <SelectItem key={event.id} value={event.id}>
+                              <div className="flex flex-col">
+                                <span className="font-medium">{event.title || event.name}</span>
+                                <div className="flex items-center space-x-2 text-xs text-muted-foreground">
+                                  <Badge className={getStatusColor(status)}>
+                                    {status}
+                                  </Badge>
+                                  <span>{formatDate(event.startDate)}</span>
+                                  {event.participants && (
+                                    <span className="flex items-center">
+                                      <Users className="w-3 h-3 mr-1" />
+                                      {event.participants.length}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  
+                  {formData.selectedEventId && (
+                    <div className="p-3 bg-blue-100 border border-blue-200 rounded">
+                      <p className="text-sm text-blue-800">
+                        <strong>Note:</strong> This challenge will be exclusively available during the selected event.
+                        It will not appear in the practice section.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {formData.eventAssignment === "practice" && (
+                <div className="p-3 bg-green-100 border border-green-200 rounded">
+                  <p className="text-sm text-green-800">
+                    <strong>Practice Challenge:</strong> This challenge will be available in the practice section 
+                    for all users to solve at any time.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Basic Information */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
@@ -367,60 +603,64 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
             </div>
           </div>
 
-          {/* Practice Visibility */}
-          <div className="space-y-4 p-4 border rounded-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Shield className="w-5 h-5" />
-                <Label className="text-base">Practice Visibility</Label>
+          {/* Practice Visibility - Only show for practice challenges */}
+          {formData.eventAssignment === "practice" && (
+            <div className="space-y-4 p-4 border rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Shield className="w-5 h-5" />
+                  <Label className="text-base">Practice Visibility</Label>
+                </div>
               </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="availableInPractice"
-                  checked={formData.availableInPractice}
-                  onCheckedChange={(checked) => setFormData({...formData, availableInPractice: checked})}
-                />
-                <Label htmlFor="availableInPractice" className="text-sm">
-                  Available in Practice
-                </Label>
-              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="availableInPractice"
+                    checked={formData.availableInPractice}
+                    onCheckedChange={(checked) => setFormData({...formData, availableInPractice: checked})}
+                  />
+                  <Label htmlFor="availableInPractice" className="text-sm">
+                    Available in Practice
+                  </Label>
+                </div>
 
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="featuredOnPractice"
-                  checked={formData.featuredOnPractice}
-                  onCheckedChange={(checked) => setFormData({...formData, featuredOnPractice: checked})}
-                />
-                <Label htmlFor="featuredOnPractice" className="text-sm">
-                  <Star className="w-4 h-4 inline mr-1" />
-                  Featured on Practice
-                </Label>
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="featuredOnPractice"
+                    checked={formData.featuredOnPractice}
+                    onCheckedChange={(checked) => setFormData({...formData, featuredOnPractice: checked})}
+                  />
+                  <Label htmlFor="featuredOnPractice" className="text-sm">
+                    <Star className="w-4 h-4 inline mr-1" />
+                    Featured on Practice
+                  </Label>
+                </div>
+              </div>
+              
+              <div>
+                <Label htmlFor="challengeType">Challenge Type</Label>
+                <Select 
+                  value={formData.challengeType} 
+                  onValueChange={(value: 'practice' | 'live' | 'past_event') => setFormData({...formData, challengeType: value})}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="practice">Practice Challenge</SelectItem>
+                    <SelectItem value="past_event">Past Event Challenge</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  "Practice" challenges are regular practice content. "Past Event" challenges are from previous competitions.
+                </p>
               </div>
             </div>
-            
-            <div>
-              <Label htmlFor="challengeType">Challenge Type</Label>
-              <Select 
-                value={formData.challengeType} 
-                onValueChange={(value: 'practice' | 'live' | 'past_event') => setFormData({...formData, challengeType: value})}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="practice">Practice Challenge</SelectItem>
-                  <SelectItem value="live">Live Event Challenge</SelectItem>
-                  <SelectItem value="past_event">Past Event Challenge</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">
-                "Practice" challenges appear in the Practice section. "Live Event" challenges are only available during events.
-              </p>
-            </div>
-          </div>
+          )}
+
+          {/* Rest of the form remains the same (Creator Information, External Challenge, Multiple Questions, etc.) */}
+          {/* ... (Keep all the existing sections below exactly as they were) ... */}
 
           {/* Creator Information */}
           <div className="space-y-4 p-4 border rounded-lg">
@@ -783,6 +1023,5 @@ const ChallengeCreation = ({ onBack }: ChallengeCreationProps) => {
     </Card>
   );
 };
-
 
 export default ChallengeCreation;

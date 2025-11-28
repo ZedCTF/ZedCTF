@@ -1,31 +1,46 @@
 // src/components/AdminDashboard.tsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAdminContext } from "../contexts/AdminContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
   Users, 
-  Shield, 
+  Shield,
   Calendar, 
   FileText, 
   BarChart3,
   Plus,
   Settings,
-  List
+  List,
+  Edit3
 } from "lucide-react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 import { useNavigate } from "react-router-dom";
+import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { db } from "../firebase";
 
-// Import the new components we'll create
+// Import the components
 import UserManagement from "./admin/UserManagement";
 import ChallengeCreation from "./admin/ChallengeCreation";
 import ChallengeManagement from "./admin/ChallengeManagement";
 import ChallengeEdit from "./admin/ChallengeEdit";
 import EventScheduling from "./admin/EventScheduling";
+import EventManagement from "./admin/EventManagement";
 import WriteupReview from "./admin/WriteupReview";
 import PlatformAnalytics from "./admin/PlatformAnalytics";
 import SystemSettings from "./admin/SystemSettings";
+import AddChallenges from "./admin/AddChallenges";
+
+interface Stats {
+  totalUsers: number;
+  activeChallenges: number;
+  totalChallenges: number;
+  liveEvents: number;
+  totalEvents: number;
+  pendingWriteups: number;
+  totalWriteups: number;
+}
 
 const AdminDashboard = () => {
   const { isAdmin, isModerator } = useAdminContext();
@@ -33,18 +48,96 @@ const AdminDashboard = () => {
   const [activeView, setActiveView] = useState("overview");
   const [selectedChallenge, setSelectedChallenge] = useState<any>(null);
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
+  const [stats, setStats] = useState<Stats>({
+    totalUsers: 0,
+    activeChallenges: 0,
+    totalChallenges: 0,
+    liveEvents: 0,
+    totalEvents: 0,
+    pendingWriteups: 0,
+    totalWriteups: 0
+  });
+  const [loading, setLoading] = useState(true);
+
+  // Fetch real stats from Firestore
+  const fetchStats = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch users count
+      const usersSnapshot = await getDocs(collection(db, "users"));
+      const totalUsers = usersSnapshot.size;
+
+      // Fetch challenges
+      const challengesSnapshot = await getDocs(collection(db, "challenges"));
+      const totalChallenges = challengesSnapshot.size;
+      const activeChallenges = challengesSnapshot.docs.filter(doc => 
+        doc.data().isActive === true
+      ).length;
+
+      // Fetch events
+      const eventsSnapshot = await getDocs(collection(db, "events"));
+      const totalEvents = eventsSnapshot.size;
+      
+      // Calculate live events
+      const now = new Date();
+      const liveEvents = eventsSnapshot.docs.filter(doc => {
+        const data = doc.data();
+        if (!data.startDate || !data.endDate) return false;
+        
+        const start = new Date(data.startDate);
+        const end = new Date(data.endDate);
+        return now >= start && now <= end;
+      }).length;
+
+      // Fetch writeups
+      const writeupsSnapshot = await getDocs(collection(db, "writeups"));
+      const totalWriteups = writeupsSnapshot.size;
+      const pendingWriteups = writeupsSnapshot.docs.filter(doc => 
+        doc.data().status === 'pending' || !doc.data().status
+      ).length;
+
+      setStats({
+        totalUsers,
+        activeChallenges,
+        totalChallenges,
+        liveEvents,
+        totalEvents,
+        pendingWriteups,
+        totalWriteups
+      });
+
+    } catch (error: any) {
+      console.error("Error fetching stats:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Handle event creation - redirect to challenge management
   const handleEventCreated = (eventId: string, eventData: any) => {
-    // Store the created event
     setSelectedEvent({ id: eventId, ...eventData });
-    
-    // Redirect to Challenge Management for this event
     setActiveView("challenge-management");
-    
-    // You can pass the event context to ChallengeManagement if needed
     console.log("Event created, redirecting to challenge management:", eventData);
   };
+
+  // Handle adding challenges to event
+  const handleAddChallengesToEvent = (event: any) => {
+    setSelectedEvent(event);
+    setActiveView("add-challenges");
+  };
+
+  // Handle challenges added to event
+  const handleChallengesAdded = (challengeIds: string[]) => {
+    console.log("Challenges added to event:", challengeIds);
+    setActiveView("event-management");
+  };
+
+  useEffect(() => {
+    if (isAdmin || isModerator) {
+      fetchStats();
+    }
+  }, [isAdmin, isModerator]);
 
   // Redirect if not admin/moderator
   if (!isAdmin && !isModerator) {
@@ -75,6 +168,13 @@ const AdminDashboard = () => {
     switch (activeView) {
       case "users":
         return <UserManagement onBack={() => setActiveView("overview")} />;
+      case "event-management":
+        return (
+          <EventManagement 
+            onBack={() => setActiveView("overview")}
+            onAddChallenges={handleAddChallengesToEvent}
+          />
+        );
       case "challenge-management":
         return (
           <ChallengeManagement 
@@ -86,8 +186,45 @@ const AdminDashboard = () => {
             }}
           />
         );
+      case "add-challenges":
+        return (
+          <AddChallenges
+            event={selectedEvent}
+            onBack={() => setActiveView("event-management")}
+            onChallengesAdded={handleChallengesAdded}
+            onCreateNewChallenge={() => setActiveView("create-challenge")}
+            onManageChallenges={() => setActiveView("challenge-management")}
+          />
+        );
       case "create-challenge":
-        return <ChallengeCreation onBack={() => setActiveView("challenge-management")} />;
+        return (
+          <ChallengeCreation 
+            onBack={() => {
+              // Smart back navigation - check where we came from
+              if (selectedEvent) {
+                // If we came from AddChallenges, go back there
+                setActiveView("add-challenges");
+                // Clear the selected event after navigating back
+                setSelectedEvent(null);
+              } else {
+                // Otherwise go to challenge management
+                setActiveView("challenge-management");
+              }
+            }}
+            onChallengeCreated={(challengeId) => {
+              console.log("Challenge created:", challengeId);
+              // Optionally show success message or navigate
+              if (selectedEvent) {
+                // If created from AddChallenges, go back there
+                setActiveView("add-challenges");
+                setSelectedEvent(null);
+              } else {
+                // Otherwise go to challenge management
+                setActiveView("challenge-management");
+              }
+            }}
+          />
+        );
       case "edit-challenge":
         return (
           <ChallengeEdit 
@@ -125,7 +262,7 @@ const AdminDashboard = () => {
             <Users className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">2</div>
+            <div className="text-2xl font-bold">{stats.totalUsers}</div>
             <p className="text-xs text-muted-foreground">Registered users</p>
           </CardContent>
         </Card>
@@ -136,8 +273,10 @@ const AdminDashboard = () => {
             <Shield className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">0</div>
-            <p className="text-xs text-muted-foreground">No challenges yet</p>
+            <div className="text-2xl font-bold">{stats.activeChallenges}</div>
+            <p className="text-xs text-muted-foreground">
+              {stats.totalChallenges > 0 ? `of ${stats.totalChallenges} total` : 'No challenges yet'}
+            </p>
           </CardContent>
         </Card>
 
@@ -147,8 +286,10 @@ const AdminDashboard = () => {
             <Calendar className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">0</div>
-            <p className="text-xs text-muted-foreground">No events yet</p>
+            <div className="text-2xl font-bold">{stats.liveEvents}</div>
+            <p className="text-xs text-muted-foreground">
+              {stats.totalEvents > 0 ? `of ${stats.totalEvents} total` : 'No events yet'}
+            </p>
           </CardContent>
         </Card>
 
@@ -158,8 +299,10 @@ const AdminDashboard = () => {
             <FileText className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">0</div>
-            <p className="text-xs text-muted-foreground">No write-ups yet</p>
+            <div className="text-2xl font-bold">{stats.pendingWriteups}</div>
+            <p className="text-xs text-muted-foreground">
+              {stats.totalWriteups > 0 ? `of ${stats.totalWriteups} total` : 'No write-ups yet'}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -174,7 +317,10 @@ const AdminDashboard = () => {
           <CardContent className="space-y-4">
             <Button 
               className="w-full justify-start gap-2"
-              onClick={() => setActiveView("create-challenge")}
+              onClick={() => {
+                setSelectedEvent(null); // Clear any event context
+                setActiveView("create-challenge");
+              }}
             >
               <Plus className="w-4 h-4" />
               Create New Challenge
@@ -192,6 +338,14 @@ const AdminDashboard = () => {
             >
               <Plus className="w-4 h-4" />
               Schedule New Event
+            </Button>
+            <Button 
+              variant="outline" 
+              className="w-full justify-start gap-2"
+              onClick={() => setActiveView("event-management")}
+            >
+              <Edit3 className="w-4 h-4" />
+              Manage Events
             </Button>
             <Button 
               variant="outline" 
@@ -253,7 +407,9 @@ const AdminDashboard = () => {
                 <h1 className="text-4xl font-bold mb-2">
                   {activeView === "overview" ? "Admin Dashboard" : 
                    activeView === "users" ? "User Management" :
+                   activeView === "event-management" ? "Event Management" :
                    activeView === "challenge-management" ? "Challenge Management" :
+                   activeView === "add-challenges" ? "Add Challenges to Event" :
                    activeView === "create-challenge" ? "Create Challenge" :
                    activeView === "edit-challenge" ? "Edit Challenge" :
                    activeView === "schedule-event" ? "Schedule Event" :
@@ -264,8 +420,12 @@ const AdminDashboard = () => {
                 <p className="text-muted-foreground">
                   {activeView === "overview" 
                     ? "Manage your CTF platform, users, challenges, and events"
+                    : activeView === "event-management"
+                    ? "View and manage all your created events"
                     : activeView === "challenge-management"
                     ? "Create new challenges or add existing ones to your events"
+                    : activeView === "add-challenges"
+                    ? "Add challenges to your event"
                     : "Admin management panel"
                   }
                 </p>
@@ -277,16 +437,20 @@ const AdminDashboard = () => {
                   onClick={() => {
                     if (activeView === "create-challenge" || activeView === "edit-challenge") {
                       setActiveView("challenge-management");
-                    } else if (activeView === "challenge-management") {
+                    } else if (activeView === "challenge-management" || activeView === "event-management" || activeView === "add-challenges") {
                       setActiveView("overview");
                     } else {
                       setActiveView("overview");
+                    }
+                    // Clear context when going back to overview
+                    if (activeView === "add-challenges" || activeView === "create-challenge") {
+                      setSelectedEvent(null);
                     }
                   }}
                 >
                   {activeView === "create-challenge" || activeView === "edit-challenge" 
                     ? "Back to Challenges" 
-                    : activeView === "challenge-management"
+                    : activeView === "challenge-management" || activeView === "event-management" || activeView === "add-challenges"
                     ? "Back to Dashboard"
                     : "Back to Dashboard"
                   }
@@ -300,11 +464,6 @@ const AdminDashboard = () => {
               }`}>
                 {isAdmin ? 'Administrator' : 'Moderator'}
               </div>
-              {selectedEvent && activeView === "challenge-management" && (
-                <div className="px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800">
-                  Event: {selectedEvent.name}
-                </div>
-              )}
             </div>
           </div>
 

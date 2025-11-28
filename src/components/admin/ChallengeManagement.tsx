@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Search, Edit, Trash2, Eye, Plus, Filter, Calendar, Zap, Shield } from "lucide-react";
+import { Search, Edit, Trash2, Eye, Plus, Filter, Calendar, Zap, Shield, Users, ArrowRight, ChevronDown, ChevronUp } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface ChallengeManagementProps {
   onBack: () => void;
@@ -56,10 +57,15 @@ interface Challenge {
 interface Event {
   id: string;
   title: string;
+  name: string;
   status: 'LIVE' | 'UPCOMING' | 'ENDED';
   startTime: any;
   endTime: any;
+  startDate?: string;
+  endDate?: string;
   participants: number;
+  participantCount?: number;
+  registeredUsers?: string[];
 }
 
 const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: ChallengeManagementProps) => {
@@ -74,6 +80,11 @@ const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: Challenge
   const [filterChallengeType, setFilterChallengeType] = useState("all");
   const [events, setEvents] = useState<Event[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
+  const [selectedEventForAssignment, setSelectedEventForAssignment] = useState<string>("");
+  const [bulkAssignmentMode, setBulkAssignmentMode] = useState(false);
+  const [selectedChallenges, setSelectedChallenges] = useState<Set<string>>(new Set());
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [expandedDescriptions, setExpandedDescriptions] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchChallenges();
@@ -106,18 +117,22 @@ const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: Challenge
   const fetchEvents = async () => {
     try {
       setLoadingEvents(true);
-      // Fetch events directly from Firestore
+      // Fetch all events (including ended ones for context)
       const eventsQuery = query(
         collection(db, "events"),
-        where("status", "in", ["LIVE", "UPCOMING"]),
-        orderBy("startTime", "asc")
+        orderBy("startDate", "desc")
       );
       
       const eventsSnapshot = await getDocs(eventsQuery);
-      const eventsData = eventsSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Event[];
+      const eventsData = eventsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          // Calculate participant count
+          participantCount: data.participants?.length || data.registeredUsers?.length || 0
+        };
+      }) as Event[];
       
       setEvents(eventsData);
     } catch (error) {
@@ -175,6 +190,10 @@ const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: Challenge
             return challenge.challengeType === 'past_event';
           case "featured":
             return challenge.featuredOnPractice;
+          case "unassigned":
+            return !challenge.eventId && challenge.availableInPractice;
+          case "assigned":
+            return !!challenge.eventId;
           default:
             return true;
         }
@@ -184,7 +203,151 @@ const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: Challenge
     setFilteredChallenges(filtered);
   };
 
-  const toggleChallengeStatus = async (challengeId: string, currentStatus: boolean) => {
+  const toggleChallengeSelection = (challengeId: string) => {
+    if (!bulkAssignmentMode) return; // Only allow selection in bulk mode
+    
+    setSelectedChallenges(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(challengeId)) {
+        newSet.delete(challengeId);
+      } else {
+        newSet.add(challengeId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleDescription = (challengeId: string) => {
+    setExpandedDescriptions(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(challengeId)) {
+        newSet.delete(challengeId);
+      } else {
+        newSet.add(challengeId);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllFiltered = () => {
+    const allFilteredIds = new Set(filteredChallenges.map(ch => ch.id));
+    setSelectedChallenges(allFilteredIds);
+  };
+
+  const clearSelection = () => {
+    setSelectedChallenges(new Set());
+  };
+
+  const bulkAssignToEvent = async () => {
+    if (!selectedEventForAssignment) {
+      setMessage({ type: 'error', text: 'Please select an event first' });
+      return;
+    }
+
+    if (selectedChallenges.size === 0) {
+      setMessage({ type: 'error', text: 'Please select at least one challenge' });
+      return;
+    }
+
+    const event = events.find(e => e.id === selectedEventForAssignment);
+    if (!event) {
+      setMessage({ type: 'error', text: 'Selected event not found' });
+      return;
+    }
+
+    try {
+      const updatePromises = Array.from(selectedChallenges).map(challengeId =>
+        updateDoc(doc(db, "challenges", challengeId), {
+          eventId: selectedEventForAssignment,
+          eventName: event.title || event.name,
+          challengeType: event.status === 'LIVE' ? 'live' : 'upcoming',
+          availableInPractice: false,
+          featuredOnPractice: false
+        })
+      );
+
+      await Promise.all(updatePromises);
+
+      // Update local state
+      setChallenges(challenges.map(challenge =>
+        selectedChallenges.has(challenge.id) ? {
+          ...challenge,
+          eventId: selectedEventForAssignment,
+          eventName: event.title || event.name,
+          challengeType: event.status === 'LIVE' ? 'live' : 'upcoming',
+          availableInPractice: false,
+          featuredOnPractice: false
+        } : challenge
+      ));
+
+      setMessage({ 
+        type: 'success', 
+        text: `Successfully assigned ${selectedChallenges.size} challenge(s) to "${event.title || event.name}"` 
+      });
+      
+      // Reset selection and mode
+      setSelectedChallenges(new Set());
+      setBulkAssignmentMode(false);
+      setSelectedEventForAssignment("");
+
+    } catch (error) {
+      console.error("Error in bulk assignment:", error);
+      setMessage({ type: 'error', text: 'Failed to assign challenges to event' });
+    }
+  };
+
+  const bulkRemoveFromEvents = async () => {
+    if (selectedChallenges.size === 0) {
+      setMessage({ type: 'error', text: 'Please select at least one challenge' });
+      return;
+    }
+
+    try {
+      const updatePromises = Array.from(selectedChallenges).map(challengeId =>
+        updateDoc(doc(db, "challenges", challengeId), {
+          eventId: null,
+          eventName: null,
+          challengeType: 'practice',
+          availableInPractice: true,
+          featuredOnPractice: false
+        })
+      );
+
+      await Promise.all(updatePromises);
+
+      // Update local state
+      setChallenges(challenges.map(challenge =>
+        selectedChallenges.has(challenge.id) ? {
+          ...challenge,
+          eventId: undefined,
+          eventName: undefined,
+          challengeType: 'practice',
+          availableInPractice: true,
+          featuredOnPractice: false
+        } : challenge
+      ));
+
+      setMessage({ 
+        type: 'success', 
+        text: `Successfully removed ${selectedChallenges.size} challenge(s) from events` 
+      });
+      
+      setSelectedChallenges(new Set());
+
+    } catch (error) {
+      console.error("Error in bulk removal:", error);
+      setMessage({ type: 'error', text: 'Failed to remove challenges from events' });
+    }
+  };
+
+  const handleEditChallenge = (challenge: Challenge, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent bulk selection when clicking edit
+    onEditChallenge(challenge);
+  };
+
+  const handleToggleChallengeStatus = async (challengeId: string, currentStatus: boolean, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent bulk selection when clicking deactivate/activate
+    
     try {
       await updateDoc(doc(db, "challenges", challengeId), {
         isActive: !currentStatus
@@ -192,8 +355,28 @@ const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: Challenge
       setChallenges(challenges.map(challenge =>
         challenge.id === challengeId ? { ...challenge, isActive: !currentStatus } : challenge
       ));
+      setMessage({ 
+        type: 'success', 
+        text: `Challenge ${!currentStatus ? 'activated' : 'deactivated'} successfully` 
+      });
     } catch (error) {
       console.error("Error updating challenge status:", error);
+      setMessage({ type: 'error', text: 'Failed to update challenge status' });
+    }
+  };
+
+  const handleDeleteChallenge = async (challengeId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent bulk selection when clicking delete
+    
+    if (confirm("Are you sure you want to delete this challenge? This action cannot be undone.")) {
+      try {
+        await deleteDoc(doc(db, "challenges", challengeId));
+        setChallenges(challenges.filter(challenge => challenge.id !== challengeId));
+        setMessage({ type: 'success', text: 'Challenge deleted successfully' });
+      } catch (error) {
+        console.error("Error deleting challenge:", error);
+        setMessage({ type: 'error', text: 'Failed to delete challenge' });
+      }
     }
   };
 
@@ -286,17 +469,6 @@ const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: Challenge
     }
   };
 
-  const deleteChallenge = async (challengeId: string) => {
-    if (confirm("Are you sure you want to delete this challenge? This action cannot be undone.")) {
-      try {
-        await deleteDoc(doc(db, "challenges", challengeId));
-        setChallenges(challenges.filter(challenge => challenge.id !== challengeId));
-      } catch (error) {
-        console.error("Error deleting challenge:", error);
-      }
-    }
-  };
-
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
       case "easy": return "bg-green-100 text-green-800";
@@ -343,6 +515,38 @@ const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: Challenge
     return Array.from(new Set(categories)).filter(Boolean);
   };
 
+  const formatDate = (dateString: string): string => {
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } catch {
+      return "Invalid date";
+    }
+  };
+
+  // Function to truncate and format description
+  const formatDescription = (description: string, challengeId: string, maxLength: number = 150) => {
+    const isExpanded = expandedDescriptions.has(challengeId);
+    
+    if (isExpanded || description.length <= maxLength) {
+      return (
+        <div className="whitespace-pre-wrap break-words">
+          {description}
+        </div>
+      );
+    }
+
+    return (
+      <div className="whitespace-pre-wrap break-words">
+        {description.substring(0, maxLength)}...
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <Card>
@@ -373,6 +577,120 @@ const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: Challenge
           </Button>
         </div>
       </div>
+
+      {message && (
+        <Alert className={message.type === 'success' ? 'bg-green-500/10 border-green-200' : 'bg-red-500/10 border-red-200'}>
+          <AlertDescription className={message.type === 'success' ? 'text-green-600' : 'text-red-600'}>
+            {message.text}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Bulk Assignment Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Calendar className="w-5 h-5" />
+            Bulk Event Assignment
+          </CardTitle>
+          <CardDescription>
+            Quickly assign multiple challenges to events or remove them from events
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="bulk-event-select">Select Event</Label>
+                <Select 
+                  value={selectedEventForAssignment} 
+                  onValueChange={setSelectedEventForAssignment}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose an event..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {events.filter(event => event.status !== 'ENDED').map(event => (
+                      <SelectItem key={event.id} value={event.id}>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{event.title || event.name}</span>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Badge className={
+                              event.status === 'LIVE' ? 'bg-green-100 text-green-800' : 
+                              event.status === 'UPCOMING' ? 'bg-yellow-100 text-yellow-800' : 
+                              'bg-gray-100 text-gray-800'
+                            }>
+                              {event.status}
+                            </Badge>
+                            <span>{formatDate(event.startDate || event.startTime?.toDate?.() || '')}</span>
+                            <span className="flex items-center">
+                              <Users className="w-3 h-3 mr-1" />
+                              {event.participantCount}
+                            </span>
+                          </div>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-end gap-2">
+                <Button
+                  onClick={() => {
+                    setBulkAssignmentMode(!bulkAssignmentMode);
+                    setSelectedChallenges(new Set()); // Clear selection when toggling mode
+                  }}
+                  variant={bulkAssignmentMode ? "default" : "outline"}
+                  className="w-full"
+                >
+                  {bulkAssignmentMode ? "Exit Bulk Mode" : "Enter Bulk Mode"}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {bulkAssignmentMode && (
+            <div className="space-y-4 p-4 border rounded-lg bg-blue-50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-semibold text-blue-900">Bulk Selection Mode</h4>
+                  <p className="text-sm text-blue-700">
+                    {selectedChallenges.size} challenge(s) selected
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={selectAllFiltered}>
+                    Select All ({filteredChallenges.length})
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={clearSelection}>
+                    Clear
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  onClick={bulkAssignToEvent}
+                  disabled={!selectedEventForAssignment || selectedChallenges.size === 0}
+                  className="gap-2"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  Assign {selectedChallenges.size} to Event
+                </Button>
+
+                <Button
+                  variant="outline"
+                  onClick={bulkRemoveFromEvents}
+                  disabled={selectedChallenges.size === 0}
+                >
+                  Remove {selectedChallenges.size} from Events
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Search and Filters */}
       <Card>
@@ -452,6 +770,8 @@ const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: Challenge
                   <SelectItem value="upcoming">Upcoming Event</SelectItem>
                   <SelectItem value="past">Past Event</SelectItem>
                   <SelectItem value="featured">Featured</SelectItem>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  <SelectItem value="assigned">Assigned to Events</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -466,37 +786,85 @@ const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: Challenge
           <CardDescription>
             {filteredChallenges.length} of {challenges.length} challenges shown
             {events.length > 0 && ` • ${events.length} events available`}
+            {bulkAssignmentMode && ` • ${selectedChallenges.size} selected`}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
             {filteredChallenges.map((challenge) => (
-              <div key={challenge.id} className="border rounded-lg p-4">
+              <div 
+                key={challenge.id} 
+                className={`border rounded-lg p-4 transition-colors ${
+                  bulkAssignmentMode ? 'cursor-pointer hover:bg-gray-50' : ''
+                } ${
+                  selectedChallenges.has(challenge.id) 
+                    ? 'border-blue-500 bg-blue-50' 
+                    : 'hover:border-gray-300'
+                }`}
+                onClick={() => bulkAssignmentMode && toggleChallengeSelection(challenge.id)}
+              >
                 <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
                   {/* Challenge Info */}
-                  <div className="flex-1 space-y-3">
+                  <div className="flex-1 min-w-0 space-y-3">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-semibold text-lg">{challenge.title}</h3>
-                      <Badge variant={challenge.isActive ? "default" : "secondary"}>
-                        {challenge.isActive ? "Active" : "Inactive"}
-                      </Badge>
-                      <Badge className={getDifficultyColor(challenge.difficulty)}>
-                        {challenge.difficulty}
-                      </Badge>
-                      <Badge className={getCategoryColor(challenge.finalCategory || challenge.category)}>
-                        {challenge.finalCategory || challenge.category}
-                      </Badge>
-                      <Badge variant="outline">
-                        {challenge.points} pts
-                      </Badge>
-                      {getChallengeTypeBadge(challenge)}
+                      {bulkAssignmentMode && (
+                        <div 
+                          className={`w-5 h-5 border-2 rounded flex items-center justify-center flex-shrink-0 ${
+                            selectedChallenges.has(challenge.id) 
+                              ? 'bg-blue-500 border-blue-500 text-white' 
+                              : 'border-gray-300'
+                          }`}
+                        >
+                          {selectedChallenges.has(challenge.id) && '✓'}
+                        </div>
+                      )}
+                      <h3 className="font-semibold text-lg break-words">{challenge.title}</h3>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant={challenge.isActive ? "default" : "secondary"}>
+                          {challenge.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                        <Badge className={getDifficultyColor(challenge.difficulty)}>
+                          {challenge.difficulty}
+                        </Badge>
+                        <Badge className={getCategoryColor(challenge.finalCategory || challenge.category)}>
+                          {challenge.finalCategory || challenge.category}
+                        </Badge>
+                        <Badge variant="outline">
+                          {challenge.points} pts
+                        </Badge>
+                        {getChallengeTypeBadge(challenge)}
+                      </div>
                     </div>
                     
-                    <p className="text-sm text-muted-foreground line-clamp-2">
-                      {challenge.description}
-                    </p>
+                    {/* Description with expand/collapse */}
+                    <div className="text-sm text-muted-foreground">
+                      {formatDescription(challenge.description, challenge.id)}
+                      {challenge.description.length > 150 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-xs mt-1"
+                          onClick={(e) => {
+                            e.stopPropagation(); // Prevent bulk selection
+                            toggleDescription(challenge.id);
+                          }}
+                        >
+                          {expandedDescriptions.has(challenge.id) ? (
+                            <>
+                              <ChevronUp className="w-3 h-3 mr-1" />
+                              Show Less
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="w-3 h-3 mr-1" />
+                              Show More
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </div>
                     
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
                       <span>Created by: {challenge.createdByName}</span>
                       <span>•</span>
                       <span>
@@ -514,101 +882,109 @@ const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: Challenge
                     </div>
 
                     {/* Quick Actions */}
-                    <div className="flex flex-wrap items-center gap-4 pt-2">
-                      {/* Featured on Practice Toggle */}
-                      <div className="flex items-center space-x-2">
-                        <Switch
-                          id={`featured-${challenge.id}`}
-                          checked={challenge.featuredOnPractice || false}
-                          onCheckedChange={(checked) => toggleFeaturedOnPractice(challenge.id, challenge.featuredOnPractice || false)}
-                        />
-                        <Label htmlFor={`featured-${challenge.id}`} className="text-sm">
-                          Featured on Practice
-                        </Label>
-                      </div>
-
-                      {/* Available in Practice Toggle */}
-                      <div className="flex items-center space-x-2">
-                        <Switch
-                          id={`practice-${challenge.id}`}
-                          checked={challenge.availableInPractice || false}
-                          onCheckedChange={(checked) => makeAvailableInPractice(challenge.id, checked)}
-                        />
-                        <Label htmlFor={`practice-${challenge.id}`} className="text-sm">
-                          Available in Practice
-                        </Label>
-                      </div>
-
-                      {/* Event Assignment */}
-                      {!challenge.eventId && events.length > 0 && (
+                    {!bulkAssignmentMode && (
+                      <div className="flex flex-wrap items-center gap-4 pt-2">
+                        {/* Featured on Practice Toggle */}
                         <div className="flex items-center space-x-2">
-                          <Select
-                            value=""
-                            onValueChange={(eventId) => {
-                              const event = events.find(e => e.id === eventId);
-                              if (event) {
-                                assignToEvent(challenge.id, eventId, event.title);
-                              }
-                            }}
-                          >
-                            <SelectTrigger className="w-40">
-                              <SelectValue placeholder="Assign to Event" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {events.map(event => (
-                                <SelectItem key={event.id} value={event.id}>
-                                  {event.title} ({event.status})
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <Switch
+                            id={`featured-${challenge.id}`}
+                            checked={challenge.featuredOnPractice || false}
+                            onCheckedChange={(checked) => toggleFeaturedOnPractice(challenge.id, challenge.featuredOnPractice || false)}
+                          />
+                          <Label htmlFor={`featured-${challenge.id}`} className="text-sm whitespace-nowrap">
+                            Featured on Practice
+                          </Label>
                         </div>
-                      )}
 
-                      {/* Remove from Event */}
-                      {challenge.eventId && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => removeFromEvent(challenge.id)}
-                        >
-                          Remove from Event
-                        </Button>
-                      )}
+                        {/* Available in Practice Toggle */}
+                        <div className="flex items-center space-x-2">
+                          <Switch
+                            id={`practice-${challenge.id}`}
+                            checked={challenge.availableInPractice || false}
+                            onCheckedChange={(checked) => makeAvailableInPractice(challenge.id, checked)}
+                          />
+                          <Label htmlFor={`practice-${challenge.id}`} className="text-sm whitespace-nowrap">
+                            Available in Practice
+                          </Label>
+                        </div>
 
-                      {events.length === 0 && (
-                        <Badge variant="outline" className="text-xs">
-                          No events available
-                        </Badge>
-                      )}
+                        {/* Event Assignment */}
+                        {!challenge.eventId && events.length > 0 && (
+                          <div className="flex items-center space-x-2">
+                            <Select
+                              value=""
+                              onValueChange={(eventId) => {
+                                const event = events.find(e => e.id === eventId);
+                                if (event) {
+                                  assignToEvent(challenge.id, eventId, event.title || event.name);
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="w-40">
+                                <SelectValue placeholder="Assign to Event" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {events.filter(event => event.status !== 'ENDED').map(event => (
+                                  <SelectItem key={event.id} value={event.id}>
+                                    {event.title || event.name} ({event.status})
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+
+                        {/* Remove from Event */}
+                        {challenge.eventId && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => removeFromEvent(challenge.id)}
+                            className="whitespace-nowrap"
+                          >
+                            Remove from Event
+                          </Button>
+                        )}
+
+                        {events.length === 0 && (
+                          <Badge variant="outline" className="text-xs">
+                            No events available
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Main Actions - Fixed positioning */}
+                  {!bulkAssignmentMode && (
+                    <div className="flex gap-2 flex-shrink-0 lg:flex-col lg:items-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => handleEditChallenge(challenge, e)}
+                        className="whitespace-nowrap"
+                      >
+                        <Edit className="w-4 h-4 mr-1" />
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => handleToggleChallengeStatus(challenge.id, challenge.isActive, e)}
+                        className="whitespace-nowrap"
+                      >
+                        {challenge.isActive ? "Deactivate" : "Activate"}
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={(e) => handleDeleteChallenge(challenge.id, e)}
+                        className="whitespace-nowrap"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
                     </div>
-                  </div>
-
-                  {/* Main Actions */}
-                  <div className="flex gap-2 flex-shrink-0">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onEditChallenge(challenge)}
-                    >
-                      <Edit className="w-4 h-4 mr-1" />
-                      Edit
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => toggleChallengeStatus(challenge.id, challenge.isActive)}
-                    >
-                      {challenge.isActive ? "Deactivate" : "Activate"}
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => deleteChallenge(challenge.id)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -634,6 +1010,5 @@ const ChallengeManagement = ({ onBack, onCreateNew, onEditChallenge }: Challenge
     </div>
   );
 };
-
 
 export default ChallengeManagement;
