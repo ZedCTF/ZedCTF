@@ -4,11 +4,12 @@ import { useParams, useNavigate } from "react-router-dom";
 import { doc, getDoc, collection, getDocs, query, where, orderBy, updateDoc, arrayUnion, increment, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuthContext } from "../contexts/AuthContext";
+import { useAdminContext } from "../contexts/AdminContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Alert, AlertDescription } from "../components/ui/alert";
-import { Calendar, Users, Zap, Clock, MapPin, Trophy, Shield, ArrowLeft, CheckCircle, XCircle, Crown, UserPlus } from "lucide-react";
+import { Calendar, Users, Zap, Clock, MapPin, Trophy, Shield, ArrowLeft, CheckCircle, XCircle, Crown, UserPlus, Lock, Eye, Award, BookOpen } from "lucide-react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 
@@ -48,18 +49,31 @@ interface Challenge {
   solvedBy?: string[];
   isActive: boolean;
   eventId?: string;
+  challengeType?: 'practice' | 'live' | 'past_event' | 'upcoming';
+  finalCategory?: string;
+}
+
+interface TimeLeft {
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
 }
 
 const EventDetails = () => {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
   const { user } = useAuthContext();
+  const { isAdmin, isModerator } = useAdminContext();
   const [event, setEvent] = useState<Event | null>(null);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [isRegistered, setIsRegistered] = useState(false);
+  const [isEventOwner, setIsEventOwner] = useState(false);
+  const [challengesLoaded, setChallengesLoaded] = useState(false);
+  const [timeLeft, setTimeLeft] = useState<TimeLeft | null>(null);
 
   useEffect(() => {
     if (!eventId) {
@@ -80,14 +94,14 @@ const EventDetails = () => {
     
     // Real-time listener for event updates
     const eventRef = doc(db, "events", eventId);
-    const unsubscribe = onSnapshot(eventRef, 
+    const unsubscribeEvent = onSnapshot(eventRef, 
       (doc) => {
         if (doc.exists()) {
           const eventData = {
             id: doc.id,
             ...doc.data()
           } as Event;
-          console.log("📡 Real-time update:", eventData);
+          console.log("📡 Real-time event update:", eventData);
           setEvent(eventData);
           
           // Check registration status only if user is logged in
@@ -96,16 +110,65 @@ const EventDetails = () => {
               eventData.participants?.includes(user.uid) || 
               eventData.registeredUsers?.includes(user.uid);
             setIsRegistered(!!userRegistered);
+            
+            // Check if user is event owner or admin/moderator
+            const isOwner = eventData.createdById === user.uid;
+            const hasAdminAccess = isAdmin || isModerator;
+            setIsEventOwner(isOwner || hasAdminAccess);
           }
         }
       },
       (error) => {
-        console.error("💥 Real-time listener error:", error);
+        console.error("💥 Real-time event listener error:", error);
       }
     );
     
-    return () => unsubscribe();
-  }, [eventId, user]);
+    return () => {
+      unsubscribeEvent();
+    };
+  }, [eventId, user, isAdmin, isModerator]);
+
+  // Countdown timer effect - ADDED THIS
+  useEffect(() => {
+    if (!event) return;
+
+    const calculateTimeLeft = () => {
+      const now = new Date().getTime();
+      const start = new Date(event.startDate).getTime();
+      const end = new Date(event.endDate).getTime();
+      
+      let targetTime = start;
+      let isCountdownToStart = true;
+      
+      if (now > start && now < end) {
+        // Event is live - countdown to end
+        targetTime = end;
+        isCountdownToStart = false;
+      } else if (now > end) {
+        // Event has ended
+        setTimeLeft(null);
+        return;
+      }
+      
+      const difference = targetTime - now;
+      
+      if (difference > 0) {
+        setTimeLeft({
+          days: Math.floor(difference / (1000 * 60 * 60 * 24)),
+          hours: Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+          minutes: Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60)),
+          seconds: Math.floor((difference % (1000 * 60)) / 1000)
+        });
+      } else {
+        setTimeLeft(null);
+      }
+    };
+
+    calculateTimeLeft();
+    const timer = setInterval(calculateTimeLeft, 1000);
+
+    return () => clearInterval(timer);
+  }, [event]);
 
   const fetchEventData = async () => {
     try {
@@ -129,7 +192,12 @@ const EventDetails = () => {
             eventData.participants?.includes(user.uid) || 
             eventData.registeredUsers?.includes(user.uid);
           setIsRegistered(!!userRegistered);
-          console.log("👤 User registration status:", userRegistered);
+          
+          // Check if user is event owner or admin/moderator
+          const isOwner = eventData.createdById === user.uid;
+          const hasAdminAccess = isAdmin || isModerator;
+          setIsEventOwner(isOwner || hasAdminAccess);
+          console.log("👤 User access - Registered:", userRegistered, "Owner/Admin:", isOwner || hasAdminAccess);
         }
       } else {
         console.log("❌ Event not found in Firestore");
@@ -149,37 +217,152 @@ const EventDetails = () => {
     try {
       console.log("🔄 Fetching challenges for event:", eventId);
       
-      const challengesQuery = query(
-        collection(db, "challenges"),
-        where("eventId", "==", eventId),
-        where("isActive", "==", true),
-        orderBy("points", "asc")
-      );
+      // Try multiple query approaches to ensure we get challenges
+      let challengesData: Challenge[] = [];
 
-      const challengesSnapshot = await getDocs(challengesQuery);
-      const challengesData: Challenge[] = [];
-
-      challengesSnapshot.forEach(doc => {
-        const data = doc.data();
-        challengesData.push({
-          id: doc.id,
-          title: data.title,
-          description: data.description,
-          category: data.category,
-          points: data.points,
-          difficulty: data.difficulty,
-          solvedBy: data.solvedBy,
-          isActive: data.isActive,
-          eventId: data.eventId
+      // Method 1: Query by eventId
+      try {
+        const challengesQuery = query(
+          collection(db, "challenges"),
+          where("eventId", "==", eventId),
+          orderBy("points", "asc")
+        );
+        const challengesSnapshot = await getDocs(challengesQuery);
+        
+        challengesSnapshot.forEach(doc => {
+          const data = doc.data();
+          // Only include active challenges or all if admin/owner
+          if (data.isActive !== false || isEventOwner) {
+            challengesData.push({
+              id: doc.id,
+              title: data.title,
+              description: data.description,
+              category: data.finalCategory || data.category,
+              points: data.points,
+              difficulty: data.difficulty,
+              solvedBy: data.solvedBy,
+              isActive: data.isActive,
+              eventId: data.eventId,
+              challengeType: data.challengeType
+            });
+          }
         });
-      });
+        console.log("✅ Method 1 - Challenges by eventId:", challengesData.length);
+      } catch (error) {
+        console.log("⚠️ Method 1 failed, trying alternative approach");
+      }
 
-      console.log("✅ Challenges fetched:", challengesData.length);
+      // If no challenges found, try without the active filter
+      if (challengesData.length === 0) {
+        try {
+          const allChallengesQuery = query(
+            collection(db, "challenges"),
+            where("eventId", "==", eventId)
+          );
+          const allChallengesSnapshot = await getDocs(allChallengesQuery);
+          
+          allChallengesSnapshot.forEach(doc => {
+            const data = doc.data();
+            challengesData.push({
+              id: doc.id,
+              title: data.title,
+              description: data.description,
+              category: data.finalCategory || data.category,
+              points: data.points,
+              difficulty: data.difficulty,
+              solvedBy: data.solvedBy,
+              isActive: data.isActive,
+              eventId: data.eventId,
+              challengeType: data.challengeType
+            });
+          });
+          console.log("✅ Method 2 - All challenges:", challengesData.length);
+        } catch (error) {
+          console.error("❌ Method 2 failed:", error);
+        }
+      }
+
+      // Final fallback: get all challenges and filter client-side
+      if (challengesData.length === 0) {
+        try {
+          const allChallengesSnapshot = await getDocs(collection(db, "challenges"));
+          allChallengesSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.eventId === eventId) {
+              challengesData.push({
+                id: doc.id,
+                title: data.title,
+                description: data.description,
+                category: data.finalCategory || data.category,
+                points: data.points,
+                difficulty: data.difficulty,
+                solvedBy: data.solvedBy,
+                isActive: data.isActive,
+                eventId: data.eventId,
+                challengeType: data.challengeType
+              });
+            }
+          });
+          console.log("✅ Method 3 - Client-side filtered:", challengesData.length);
+        } catch (error) {
+          console.error("❌ Method 3 failed:", error);
+        }
+      }
+
+      console.log("✅ Final challenges count:", challengesData.length);
       setChallenges(challengesData);
+      setChallengesLoaded(true);
+
+      // Set up real-time listener for challenges after initial load
+      setupChallengesListener();
+
     } catch (error) {
       console.error("❌ Error fetching challenges:", error);
       setChallenges([]);
+      setChallengesLoaded(true);
     }
+  };
+
+  const setupChallengesListener = () => {
+    if (!eventId) return;
+
+    // Real-time listener for challenges
+    const challengesQuery = query(
+      collection(db, "challenges"),
+      where("eventId", "==", eventId)
+    );
+    
+    const unsubscribeChallenges = onSnapshot(challengesQuery,
+      (snapshot) => {
+        const challengesData: Challenge[] = [];
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          // Only include active challenges or all if admin/owner
+          if (data.isActive !== false || isEventOwner) {
+            challengesData.push({
+              id: doc.id,
+              title: data.title,
+              description: data.description,
+              category: data.finalCategory || data.category,
+              points: data.points,
+              difficulty: data.difficulty,
+              solvedBy: data.solvedBy,
+              isActive: data.isActive,
+              eventId: data.eventId,
+              challengeType: data.challengeType
+            });
+          }
+        });
+        console.log("📡 Real-time challenges update:", challengesData.length);
+        setChallenges(challengesData);
+      },
+      (error) => {
+        console.error("💥 Real-time challenges listener error:", error);
+        // Don't clear challenges on error, keep existing ones
+      }
+    );
+
+    return unsubscribeChallenges;
   };
 
   const formatDate = (dateString: string): string => {
@@ -210,6 +393,25 @@ const EventDetails = () => {
       });
     } catch {
       return "Invalid time";
+    }
+  };
+
+  // ADDED THIS FUNCTION for better date/time display
+  const formatDateTime = (dateString: string): string => {
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return "Invalid date/time";
+      }
+      return date.toLocaleString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric',
+        hour: '2-digit', 
+        minute: '2-digit'
+      });
+    } catch {
+      return "Invalid date/time";
     }
   };
 
@@ -280,13 +482,13 @@ const EventDetails = () => {
   const joinEvent = () => {
     if (!event) return;
     
-    if (!isRegistered) {
+    if (!isRegistered && !isEventOwner) {
       setMessage({ type: 'error', text: 'You need to register for this event first.' });
       return;
     }
 
     const eventStatus = getEventStatus(event.startDate, event.endDate);
-    if (eventStatus !== "LIVE") {
+    if (eventStatus !== "LIVE" && !isEventOwner) {
       setMessage({ type: 'error', text: 'This event is not currently live.' });
       return;
     }
@@ -297,6 +499,27 @@ const EventDetails = () => {
 
   const navigateToEvents = () => {
     navigate("/events");
+  };
+
+  const handleChallengeClick = (challenge: Challenge) => {
+    const eventStatus = getEventStatus(event!.startDate, event!.endDate);
+    
+    // Allow access if:
+    // 1. User is admin/moderator/event owner
+    // 2. Event is LIVE and user is registered
+    // 3. Event is ended (for viewing purposes)
+    if (isEventOwner || eventStatus === "ENDED") {
+      navigate(`/challenge/${challenge.id}`);
+    } else if (eventStatus === "LIVE" && isRegistered) {
+      navigate(`/challenge/${challenge.id}`);
+    } else {
+      setMessage({ 
+        type: 'error', 
+        text: eventStatus === "UPCOMING" 
+          ? 'Challenges will be available when the event starts.' 
+          : 'You need to register and wait for the event to start to access challenges.' 
+      });
+    }
   };
 
   const getDifficultyColor = (difficulty: string) => {
@@ -335,6 +558,75 @@ const EventDetails = () => {
   // Safe currency display
   const getCurrencyDisplay = (event: Event): string => {
     return event.currency || 'ZMW';
+  };
+
+  // Get challenge access status
+  const getChallengeAccessStatus = (challenge: Challenge) => {
+    const eventStatus = getEventStatus(event!.startDate, event!.endDate);
+    
+    if (isEventOwner) {
+      return { accessible: true, message: "Admin/Event Owner Access" };
+    }
+    
+    if (eventStatus === "ENDED") {
+      return { accessible: true, message: "View Only - Event Ended" };
+    }
+    
+    if (eventStatus === "LIVE" && isRegistered) {
+      return { accessible: true, message: "Access Granted" };
+    }
+    
+    if (eventStatus === "LIVE" && !isRegistered) {
+      return { accessible: false, message: "Register to access challenges" };
+    }
+    
+    if (eventStatus === "UPCOMING") {
+      return { accessible: false, message: "Available when event starts" };
+    }
+    
+    return { accessible: false, message: "Access restricted" };
+  };
+
+  // ADDED THIS: Render countdown timer
+  const renderCountdown = () => {
+    if (!timeLeft) return null;
+
+    const eventStatus = getEventStatus(event!.startDate, event!.endDate);
+    const isCountdownToStart = eventStatus === "UPCOMING";
+    const targetText = isCountdownToStart ? "Event starts in" : "Event ends in";
+
+    return (
+      <Card className="mb-4 border border-blue-200 bg-blue-50">
+        <CardContent className="p-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-blue-600" />
+              <span className="font-semibold text-blue-800">{targetText}</span>
+            </div>
+            <div className="flex items-center gap-3 text-center">
+              {timeLeft.days > 0 && (
+                <div className="flex flex-col items-center">
+                  <span className="text-lg font-bold text-blue-800">{timeLeft.days}</span>
+                  <span className="text-xs text-blue-600">days</span>
+                </div>
+              )}
+              <div className="flex flex-col items-center">
+                <span className="text-lg font-bold text-blue-800">{timeLeft.hours}</span>
+                <span className="text-xs text-blue-600">hours</span>
+              </div>
+              <div className="flex flex-col items-center">
+                <span className="text-lg font-bold text-blue-800">{timeLeft.minutes}</span>
+                <span className="text-xs text-blue-600">mins</span>
+              </div>
+              <div className="flex flex-col items-center">
+                <span className="text-lg font-bold text-blue-800">{timeLeft.seconds}</span>
+                <span className="text-xs text-blue-600">secs</span>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
   };
 
   if (loading) {
@@ -434,20 +726,29 @@ const EventDetails = () => {
                   Registered
                 </Badge>
               )}
+              {isEventOwner && (
+                <Badge className="bg-purple-500/20 text-purple-600 border-purple-200 text-xs">
+                  <Shield className="w-3 h-3 mr-1" />
+                  Event Owner
+                </Badge>
+              )}
             </div>
           </div>
 
-          {/* Mobile-optimized event info */}
+          {/* ADDED: Countdown Timer */}
+          {(isEventLive || isEventUpcoming) && renderCountdown()}
+
+          {/* Mobile-optimized event info - UPDATED with better date/time and added prizes/rules */}
           <Card className="mb-4 border">
             <CardContent className="p-3 sm:p-4">
               <div className="flex flex-wrap items-center gap-2 text-xs mb-3">
                 <div className="flex items-center gap-1 text-muted-foreground">
                   <Calendar className="w-3 h-3" />
-                  <span>{formatDate(event.startDate)} at {formatTime(event.startDate)}</span>
+                  <span>Starts: {formatDateTime(event.startDate)}</span>
                 </div>
                 <div className="flex items-center gap-1 text-muted-foreground">
                   <Clock className="w-3 h-3" />
-                  <span>Ends: {formatDate(event.endDate)} at {formatTime(event.endDate)}</span>
+                  <span>Ends: {formatDateTime(event.endDate)}</span>
                 </div>
                 <div className="flex items-center gap-1 text-muted-foreground">
                   <Users className="w-3 h-3" />
@@ -459,12 +760,47 @@ const EventDetails = () => {
                     <span className="capitalize">{event.participationType}</span>
                   </div>
                 )}
+                {event.location && (
+                  <div className="flex items-center gap-1 text-muted-foreground">
+                    <MapPin className="w-3 h-3" />
+                    <span>{event.location}</span>
+                  </div>
+                )}
               </div>
               
               {event.description && (
-                <p className="text-sm text-muted-foreground leading-relaxed break-words">
-                  {event.description}
-                </p>
+                <div className="mb-3">
+                  <h3 className="font-semibold text-sm mb-1">Description</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed break-words">
+                    {event.description}
+                  </p>
+                </div>
+              )}
+
+              {/* ADDED: Prizes Section */}
+              {event.prizes && (
+                <div className="mb-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Trophy className="w-4 h-4 text-yellow-600" />
+                    <h3 className="font-semibold text-sm">Prizes</h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground leading-relaxed break-words">
+                    {event.prizes}
+                  </p>
+                </div>
+              )}
+
+              {/* ADDED: Rules Section */}
+              {event.rules && (
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <BookOpen className="w-4 h-4 text-blue-600" />
+                    <h3 className="font-semibold text-sm">Rules & Guidelines</h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground leading-relaxed break-words">
+                    {event.rules}
+                  </p>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -487,13 +823,13 @@ const EventDetails = () => {
 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-2 mb-6">
-            {isEventLive && isRegistered && user && (
+            {(isEventLive && (isRegistered || isEventOwner)) && (
               <Button onClick={joinEvent} className="bg-primary flex-1">
                 <Zap className="w-4 h-4 mr-2" />
-                Join Event Now
+                {isEventOwner ? "Manage Event" : "Join Event Now"}
               </Button>
             )}
-            {isEventUpcoming && !isRegistered && user && (
+            {isEventUpcoming && !isRegistered && user && !isEventOwner && (
               <Button 
                 onClick={registerForEvent} 
                 disabled={registering}
@@ -545,17 +881,29 @@ const EventDetails = () => {
             </Alert>
           )}
 
-          {/* Mobile-optimized main content */}
+          {/* Mobile-optimized main content - KEPT ORIGINAL CHALLENGES SECTION */}
           <div className="flex flex-col lg:grid lg:grid-cols-3 gap-4">
             {/* Main Content - Full width on mobile */}
             <div className="lg:col-span-2 space-y-4">
-              {/* Challenges Section */}
+              {/* Challenges Section - THIS SHOULD WORK NOW */}
               <Card className="border">
                 <CardHeader className="p-4 pb-2">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Shield className="w-4 h-4" />
                     Event Challenges ({challenges.length})
+                    {challenges.length > 0 && (
+                      <Badge variant="outline" className="text-xs">
+                        {isEventOwner ? "Full Access" : 
+                         isEventLive && isRegistered ? "Access Granted" :
+                         isEventEnded ? "View Only" : "Locked"}
+                      </Badge>
+                    )}
                   </CardTitle>
+                  {!challengesLoaded && (
+                    <CardDescription className="text-xs">
+                      Loading challenges...
+                    </CardDescription>
+                  )}
                 </CardHeader>
                 <CardContent className="p-4 pt-2">
                   {challenges.length === 0 ? (
@@ -563,47 +911,73 @@ const EventDetails = () => {
                       <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
                       <p className="text-sm text-muted-foreground">No challenges available for this event yet.</p>
                       <p className="text-xs text-muted-foreground mt-1">Check back later or contact the event organizer.</p>
+                      {isEventOwner && (
+                        <Button 
+                          onClick={() => navigate(`/admin/events`)} 
+                          variant="outline" 
+                          size="sm" 
+                          className="mt-2"
+                        >
+                          Add Challenges
+                        </Button>
+                      )}
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {challenges.map((challenge) => (
-                        <Card 
-                          key={challenge.id} 
-                          className="border-border hover:border-primary/30 cursor-pointer transition-colors"
-                          onClick={() => user && navigate(`/challenge/${challenge.id}`)}
-                        >
-                          <CardContent className="p-3">
-                            <div className="flex justify-between items-start mb-2">
-                              <h3 className="font-semibold text-sm">{challenge.title}</h3>
-                              <Badge variant="outline" className="font-mono text-xs">
-                                {challenge.points} pts
-                              </Badge>
-                            </div>
-                            <div className="flex items-center gap-2 mb-2">
-                              <Badge 
-                                variant="secondary"
-                                className={`${getDifficultyColor(challenge.difficulty)} text-xs`}
-                              >
-                                {challenge.difficulty}
-                              </Badge>
-                              <Badge 
-                                variant="secondary"
-                                className={`${getCategoryColor(challenge.category)} text-xs`}
-                              >
-                                {challenge.category}
-                              </Badge>
-                            </div>
-                            <p className="text-xs text-muted-foreground line-clamp-2">
-                              {challenge.description}
-                            </p>
-                            {!user && (
-                              <p className="text-xs text-blue-600 mt-2">
-                                Login to view challenge details
+                      {challenges.map((challenge) => {
+                        const access = getChallengeAccessStatus(challenge);
+                        return (
+                          <Card 
+                            key={challenge.id} 
+                            className={`border-border transition-colors ${
+                              access.accessible ? 'hover:border-primary/30 cursor-pointer' : 'opacity-70'
+                            }`}
+                            onClick={() => access.accessible && handleChallengeClick(challenge)}
+                          >
+                            <CardContent className="p-3">
+                              <div className="flex justify-between items-start mb-2">
+                                <div className="flex items-center gap-2">
+                                  <h3 className="font-semibold text-sm">{challenge.title}</h3>
+                                  {!access.accessible && <Lock className="w-3 h-3 text-muted-foreground" />}
+                                </div>
+                                <Badge variant="outline" className="font-mono text-xs">
+                                  {challenge.points} pts
+                                </Badge>
+                              </div>
+                              <div className="flex items-center gap-2 mb-2">
+                                <Badge 
+                                  variant="secondary"
+                                  className={`${getDifficultyColor(challenge.difficulty)} text-xs`}
+                                >
+                                  {challenge.difficulty}
+                                </Badge>
+                                <Badge 
+                                  variant="secondary"
+                                  className={`${getCategoryColor(challenge.category)} text-xs`}
+                                >
+                                  {challenge.category}
+                                </Badge>
+                              </div>
+                              <p className="text-xs text-muted-foreground line-clamp-2">
+                                {challenge.description}
                               </p>
-                            )}
-                          </CardContent>
-                        </Card>
-                      ))}
+                              <div className="flex justify-between items-center mt-2">
+                                <p className={`text-xs ${
+                                  access.accessible ? 'text-green-600' : 'text-orange-600'
+                                }`}>
+                                  {access.message}
+                                </p>
+                                {access.accessible && (
+                                  <Button variant="ghost" size="sm" className="h-6 px-2 text-xs">
+                                    <Eye className="w-3 h-3 mr-1" />
+                                    View
+                                  </Button>
+                                )}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
                     </div>
                   )}
                 </CardContent>
@@ -612,7 +986,7 @@ const EventDetails = () => {
 
             {/* Sidebar - Full width on mobile, sticky on desktop */}
             <div className="space-y-4">
-              {/* Event Info Card */}
+              {/* Event Info Card - UPDATED with better date/time */}
               <Card className="border lg:sticky lg:top-4">
                 <CardHeader className="p-4 pb-2">
                   <CardTitle className="text-base">Event Information</CardTitle>
@@ -623,8 +997,12 @@ const EventDetails = () => {
                     <p className="capitalize text-sm">{eventStatus.toLowerCase()}</p>
                   </div>
                   <div>
-                    <h4 className="font-semibold text-xs text-muted-foreground">Duration</h4>
-                    <p className="text-sm">{formatDate(event.startDate)} - {formatDate(event.endDate)}</p>
+                    <h4 className="font-semibold text-xs text-muted-foreground">Start Time</h4>
+                    <p className="text-sm">{formatDateTime(event.startDate)}</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-xs text-muted-foreground">End Time</h4>
+                    <p className="text-sm">{formatDateTime(event.endDate)}</p>
                   </div>
                   <div>
                     <h4 className="font-semibold text-xs text-muted-foreground">Participants</h4>
@@ -642,6 +1020,12 @@ const EventDetails = () => {
                     <div>
                       <h4 className="font-semibold text-xs text-muted-foreground">Fee</h4>
                       <p className="text-sm">{event.individualPrice} {currency}</p>
+                    </div>
+                  )}
+                  {isEventOwner && (
+                    <div>
+                      <h4 className="font-semibold text-xs text-muted-foreground">Your Role</h4>
+                      <p className="text-sm text-purple-600">Event Owner/Admin</p>
                     </div>
                   )}
                 </CardContent>
