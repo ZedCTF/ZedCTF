@@ -16,9 +16,13 @@ import Dashboard from './components/Dashboard';
 import Practice from './components/Practice';
 import LiveEvents from './components/LiveEvents';
 import Leaderboard from './components/Leaderboard';
+import GlobalLeaderboard from './components/GlobalLeaderboard';
+import LiveLeaderboard from './components/LiveLeaderboard';
 import AdminDashboard from './components/AdminDashboard';
 import ChallengeDetail from './components/ChallengeDetail';
-import EventDetails from './components/EventDetails';
+import UpcomingEventDetails from './components/UpcomingEventDetails';
+import LiveEventDetails from './components/LiveEventDetails';
+import PastEventDetails from './components/PastEventDetails';
 import Navbar from './components/Navbar';
 
 function App() {
@@ -38,6 +42,8 @@ function App() {
                   
                   {/* Public Routes */}
                   <Route path="/leaderboard" element={<Leaderboard />} />
+                  <Route path="/leaderboard/global" element={<GlobalLeaderboard />} />
+                  <Route path="/leaderboard/live" element={<LiveLeaderboard />} />
                   <Route path="/writeups" element={<Writeups />} />
                   
                   {/* User-Only Routes (Regular users only) */}
@@ -94,13 +100,33 @@ function App() {
                     } 
                   />
                   
-                  {/* Event Details Route - User only */}
+                  {/* Event Details Routes - User only */}
                   <Route 
-                    path="/event/:eventId" 
+                    path="/event/upcoming/:eventId" 
                     element={
                       <ProtectedRoute>
                         <UserOnlyRoute>
-                          <EventDetails />
+                          <UpcomingEventDetails />
+                        </UserOnlyRoute>
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/event/live/:eventId" 
+                    element={
+                      <ProtectedRoute>
+                        <UserOnlyRoute>
+                          <LiveEventDetails />
+                        </UserOnlyRoute>
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/event/past/:eventId" 
+                    element={
+                      <ProtectedRoute>
+                        <UserOnlyRoute>
+                          <PastEventDetails />
                         </UserOnlyRoute>
                       </ProtectedRoute>
                     } 

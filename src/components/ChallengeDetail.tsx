@@ -1,4 +1,3 @@
-// src/components/ChallengeDetail.tsx
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { doc, getDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, arrayUnion, increment, onSnapshot } from "firebase/firestore";
@@ -43,6 +42,7 @@ interface Challenge {
   availableInPractice?: boolean;
   challengeType?: 'practice' | 'live' | 'past_event';
   totalPoints?: number;
+  eventId?: string;
 }
 
 interface Submission {
@@ -54,6 +54,7 @@ interface Submission {
   isCorrect: boolean;
   submittedAt: any;
   pointsAwarded?: number;
+  eventId?: string;
 }
 
 const ChallengeDetail = () => {
@@ -103,6 +104,7 @@ const ChallengeDetail = () => {
           ...challengeDoc.data()
         } as Challenge;
         console.log("✅ Challenge found:", challengeData);
+        console.log("🎯 Challenge eventId:", challengeData.eventId);
         setChallenge(challengeData);
         
         // Initialize hints visibility
@@ -193,8 +195,8 @@ const ChallengeDetail = () => {
         pointsToAward = challenge.points || 0;
       }
 
-      // Record submission
-      const submissionData = {
+      // Record submission - CRITICAL: Include eventId if challenge belongs to an event
+      const submissionData: any = {
         challengeId: challenge.id,
         challengeTitle: challenge.title,
         userId: user.uid,
@@ -202,8 +204,18 @@ const ChallengeDetail = () => {
         flag: flagInput,
         isCorrect: isCorrect,
         submittedAt: new Date(),
-        pointsAwarded: pointsToAward
+        pointsAwarded: pointsToAward,
+        points: pointsToAward, // Also include as 'points' for compatibility
+        username: user.displayName || user.email?.split('@')[0] || 'User'
       };
+
+      // ADD THIS: Include eventId if the challenge belongs to an event
+      if (challenge.eventId) {
+        submissionData.eventId = challenge.eventId;
+        console.log(`🎯 Adding eventId to submission: ${challenge.eventId}`);
+      } else {
+        console.log(`⚠️ Challenge ${challenge.id} has no eventId`);
+      }
 
       await addDoc(collection(db, "submissions"), submissionData);
 
@@ -425,6 +437,12 @@ const ChallengeDetail = () => {
                   Featured
                 </Badge>
               )}
+              {challenge.eventId && (
+                <Badge className="bg-blue-500/20 text-blue-600 border-blue-200 text-xs">
+                  <Shield className="w-3 h-3 mr-1" />
+                  Event Challenge
+                </Badge>
+              )}
             </div>
           </div>
 
@@ -477,6 +495,11 @@ const ChallengeDetail = () => {
                     ) : (
                       <span>{challenge.originalCreator.name}</span>
                     )}
+                  </div>
+                )}
+                {challenge.eventId && (
+                  <div className="flex items-center gap-1">
+                    <span>Event ID: {challenge.eventId}</span>
                   </div>
                 )}
               </div>
