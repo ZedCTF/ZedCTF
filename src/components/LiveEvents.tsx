@@ -9,6 +9,9 @@ import { collection, getDocs, query, orderBy, doc, updateDoc, arrayUnion, addDoc
 import { db } from "../firebase";
 import { useAuthContext } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface LiveEvent {
   id: string;
@@ -56,6 +59,8 @@ const LiveEvents = () => {
   const [error, setError] = useState<string | null>(null);
   const [processingPayment, setProcessingPayment] = useState(false);
   const [userRole, setUserRole] = useState<string>("user");
+  const [showHostingDialog, setShowHostingDialog] = useState(false);
+  const [eventName, setEventName] = useState("");
 
   // Fetch user role from Firestore
   const fetchUserRole = async () => {
@@ -267,9 +272,18 @@ const LiveEvents = () => {
     navigate(`/event/${eventId}`);
   };
 
+  // Open hosting dialog
+  const openHostingDialog = () => {
+    setShowHostingDialog(true);
+    setEventName("");
+  };
+
   // Process Flutterwave payment for event hosting
   const processHostingPayment = async () => {
-    if (!user) return;
+    if (!user || !eventName.trim()) {
+      alert("Please enter an event name");
+      return;
+    }
     
     setProcessingPayment(true);
 
@@ -279,6 +293,7 @@ const LiveEvents = () => {
         userId: user.uid,
         userEmail: user.email,
         userName: user.displayName || user.email,
+        eventName: eventName.trim(),
         hostingFee: 5,
         status: "pending_payment",
         submittedAt: new Date(),
@@ -295,8 +310,31 @@ const LiveEvents = () => {
         paidAt: new Date()
       });
 
-      // Redirect to event scheduling after successful payment
-      navigate("/admin?tab=events&hosting_paid=true");
+      // Create the event with user as owner
+      const eventData = {
+        name: eventName.trim(),
+        title: eventName.trim(),
+        createdBy: "user",
+        createdById: user.uid,
+        createdByEmail: user.email,
+        createdByName: user.displayName || user.email,
+        status: "draft",
+        hostingFee: 5,
+        hostingPaymentStatus: "paid",
+        participants: [],
+        registeredUsers: [],
+        startDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Default: 7 days from now
+        endDate: new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString(), // Default: 8 days from now
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      const eventRef = await addDoc(collection(db, "events"), eventData);
+
+      setShowHostingDialog(false);
+      
+      // Redirect to event management after successful payment
+      navigate(`/admin?tab=events&event=${eventRef.id}`);
       
     } catch (error) {
       console.error("Payment processing error:", error);
@@ -377,12 +415,11 @@ const LiveEvents = () => {
                   </div>
                   <div className="flex gap-2">
                     <Button 
-                      onClick={processHostingPayment}
-                      disabled={processingPayment}
+                      onClick={openHostingDialog}
                       className="bg-primary hover:bg-primary/90 text-primary-foreground"
                     >
                       <CreditCard className="w-4 h-4 mr-2" />
-                      {processingPayment ? "Processing..." : "Get Hosting Access - 5 ZMW"}
+                      Get Hosting Access - 5 ZMW
                     </Button>
                     {userRole === 'admin' && (
                       <Button onClick={navigateToAdmin} variant="outline">
@@ -429,6 +466,54 @@ const LiveEvents = () => {
               </CardContent>
             </Card>
           )}
+
+          {/* Hosting Dialog */}
+          <Dialog open={showHostingDialog} onOpenChange={setShowHostingDialog}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Host Your Event</DialogTitle>
+                <DialogDescription>
+                  Enter a name for your event and complete the payment to get hosting access.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="eventName">Event Name</Label>
+                  <Input
+                    id="eventName"
+                    placeholder="Enter your event name"
+                    value={eventName}
+                    onChange={(e) => setEventName(e.target.value)}
+                  />
+                </div>
+                <div className="p-4 bg-muted rounded-lg">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="font-medium">Hosting Fee:</span>
+                    <span className="text-lg font-bold text-primary">ZMW 5</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    After payment, you'll be redirected to event management where you can set up your event details, challenges, and schedule.
+                  </p>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowHostingDialog(false)}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={processHostingPayment}
+                  disabled={processingPayment || !eventName.trim()}
+                  className="bg-primary hover:bg-primary/90"
+                >
+                  <CreditCard className="w-4 h-4 mr-2" />
+                  {processingPayment ? "Processing Payment..." : "Pay 5 ZMW"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* Live Event Card */}
           {currentLiveEvent ? (
@@ -558,7 +643,7 @@ const LiveEvents = () => {
             </div>
           )}
 
-          {/* Upcoming Events */}
+          {/* Upcoming Events - Simplified Display */}
           <div className="max-w-4xl mx-auto">
             <h3 className="text-2xl font-bold mb-6">Upcoming Events</h3>
             {upcomingEvents.length === 0 ? (
@@ -569,52 +654,21 @@ const LiveEvents = () => {
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-2">
                 {upcomingEvents.map((event) => (
                   <Card 
                     key={event.id} 
                     className="border-border hover:border-primary/30 cursor-pointer transition-colors"
                     onClick={() => navigateToEventDetails(event.id)}
                   >
-                    <CardContent className="p-6">
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="mb-3">
-                            <h4 className="font-bold text-xl mb-2">{event.title || event.name}</h4>
-                            <div className="flex items-center gap-2">
-                              {event.createdBy === 'user' && (
-                                <Badge variant="secondary">
-                                  Community Hosted
-                                </Badge>
-                              )}
-                              {event.maxParticipants && event.participants >= event.maxParticipants && (
-                                <Badge variant="secondary" className="bg-destructive/10 text-destructive">
-                                  FULL
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                            <div className="flex items-center gap-2">
-                              <Calendar className="w-4 h-4" />
-                              {event.date}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Users className="w-4 h-4" />
-                              {event.participants > 0 ? `${event.participants} registered` : 'No registrations yet'}
-                              {event.maxParticipants && event.maxParticipants > 0 && ` / ${event.maxParticipants} max`}
-                            </div>
-                            {event.challengeCount !== undefined && event.challengeCount > 0 && (
-                              <div className="flex items-center gap-2">
-                                <Zap className="w-4 h-4" />
-                                {event.challengeCount} challenges
-                              </div>
-                            )}
-                          </div>
-                          {event.description && (
-                            <p className="text-sm text-muted-foreground mt-2">{event.description}</p>
-                          )}
-                        </div>
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-bold text-lg">{event.title || event.name}</h4>
+                        {event.createdBy === 'user' && (
+                          <Badge variant="secondary" className="ml-2">
+                            Community Hosted
+                          </Badge>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
