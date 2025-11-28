@@ -1,11 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Clock, Users, Zap, Calendar, Crown, CreditCard } from "lucide-react";
+import { Clock, Users, Zap, Calendar, Crown, CreditCard, Trophy, Medal } from "lucide-react";
 import { useEffect, useState } from "react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
-import { collection, getDocs, query, orderBy, doc, updateDoc, arrayUnion, addDoc, getDoc } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, doc, updateDoc, arrayUnion, addDoc, getDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuthContext } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -50,17 +50,39 @@ interface UpcomingEvent {
   challengeCount?: number;
 }
 
+interface PastEvent {
+  id: string;
+  name: string;
+  title?: string;
+  startDate: string;
+  endDate: string;
+  participants: number;
+  challengeCount?: number;
+  createdBy?: "admin" | "user";
+  winners?: { rank: number; name: string; points: number }[];
+  finalScores?: { rank: number; name: string; points: number }[];
+}
+
+interface TopPlayer {
+  rank: number;
+  name: string;
+  points: number;
+  userId: string;
+}
+
 const LiveEvents = () => {
   const { user } = useAuthContext();
   const navigate = useNavigate();
   const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
+  const [pastEvents, setPastEvents] = useState<PastEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processingPayment, setProcessingPayment] = useState(false);
   const [userRole, setUserRole] = useState<string>("user");
   const [showHostingDialog, setShowHostingDialog] = useState(false);
   const [eventName, setEventName] = useState("");
+  const [topPlayers, setTopPlayers] = useState<TopPlayer[]>([]);
 
   // Fetch user role from Firestore
   const fetchUserRole = async () => {
@@ -142,6 +164,112 @@ const LiveEvents = () => {
     return name.replace(/0+$/, '').trim();
   };
 
+  // Fetch challenges count for an event
+  const fetchChallengeCount = async (eventId: string): Promise<number> => {
+    try {
+      const challengesQuery = query(
+        collection(db, "challenges"),
+        where("eventId", "==", eventId)
+      );
+      const challengesSnapshot = await getDocs(challengesQuery);
+      return challengesSnapshot.size;
+    } catch (error) {
+      console.error("Error fetching challenge count:", error);
+      return 0;
+    }
+  };
+
+  // Fetch top players for live events
+  const fetchTopPlayers = async (eventId: string): Promise<TopPlayer[]> => {
+    try {
+      // Get event participants
+      const eventDoc = await getDoc(doc(db, "events", eventId));
+      if (!eventDoc.exists()) return [];
+      
+      const eventData = eventDoc.data();
+      const participants = eventData.participants || [];
+      
+      // Fetch user data and calculate scores
+      const playerData: TopPlayer[] = [];
+      
+      for (const userId of participants.slice(0, 10)) { // Limit to top 10 for performance
+        try {
+          const userDoc = await getDoc(doc(db, "users", userId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            // Calculate event-specific points
+            const eventPoints = userData.eventPoints?.[eventId] || 
+                               userData.totalPoints || 
+                               0;
+            
+            playerData.push({
+              rank: 0, // Will be set after sorting
+              name: userData.displayName || userData.username || userData.email?.split('@')[0] || 'Anonymous',
+              points: eventPoints,
+              userId: userId
+            });
+          }
+        } catch (error) {
+          console.error("Error fetching user data:", error);
+        }
+      }
+      
+      // Sort by points and assign ranks
+      return playerData
+        .sort((a, b) => b.points - a.points)
+        .map((player, index) => ({ ...player, rank: index + 1 }))
+        .slice(0, 3); // Only return top 3
+      
+    } catch (error) {
+      console.error("Error fetching top players:", error);
+      return [];
+    }
+  };
+
+  // Fetch final scores for past events
+  const fetchFinalScores = async (eventId: string): Promise<{ rank: number; name: string; points: number }[]> => {
+    try {
+      // Get event participants
+      const eventDoc = await getDoc(doc(db, "events", eventId));
+      if (!eventDoc.exists()) return [];
+      
+      const eventData = eventDoc.data();
+      const participants = eventData.participants || [];
+      
+      // Fetch user data and calculate final scores
+      const scoresData: { rank: number; name: string; points: number }[] = [];
+      
+      for (const userId of participants) {
+        try {
+          const userDoc = await getDoc(doc(db, "users", userId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            const eventPoints = userData.eventPoints?.[eventId] || 0;
+            
+            if (eventPoints > 0) {
+              scoresData.push({
+                rank: 0, // Will be set after sorting
+                name: userData.displayName || userData.username || userData.email?.split('@')[0] || 'Anonymous',
+                points: eventPoints
+              });
+            }
+          }
+        } catch (error) {
+          console.error("Error fetching user data for final scores:", error);
+        }
+      }
+      
+      // Sort by points and assign ranks
+      return scoresData
+        .sort((a, b) => b.points - a.points)
+        .map((score, index) => ({ ...score, rank: index + 1 }));
+      
+    } catch (error) {
+      console.error("Error fetching final scores:", error);
+      return [];
+    }
+  };
+
   // Fetch events from Firestore
   const fetchEventsData = async () => {
     try {
@@ -158,8 +286,10 @@ const LiveEvents = () => {
       const now = new Date();
       const liveData: LiveEvent[] = [];
       const upcomingData: UpcomingEvent[] = [];
+      const pastData: PastEvent[] = [];
 
-      eventsSnapshot.docs.forEach(doc => {
+      // Process events in parallel for better performance
+      const eventProcessing = eventsSnapshot.docs.map(async (doc) => {
         const data = doc.data();
         
         if (!data.startDate || !data.endDate) {
@@ -169,16 +299,14 @@ const LiveEvents = () => {
 
         // Filter approved events on client side instead of query
         const status = data.status?.toLowerCase();
-        if (status !== 'approved' && status !== 'live' && status !== 'upcoming') {
+        if (status !== 'approved' && status !== 'live' && status !== 'upcoming' && status !== 'ended') {
           return;
         }
 
         const eventStatus = getEventStatus(data.startDate, data.endDate);
         
-        // Skip ended events
-        if (eventStatus === "ENDED") {
-          return;
-        }
+        // Get challenge count for the event
+        const challengeCount = await fetchChallengeCount(doc.id);
 
         // Clean the event name and title
         const cleanedName = cleanEventName(data.name);
@@ -190,7 +318,8 @@ const LiveEvents = () => {
           originalTitle: data.title,
           cleanedName,
           cleanedTitle,
-          participants: data.totalParticipants || data.participants?.length || 0
+          participants: data.totalParticipants || data.participants?.length || 0,
+          challengeCount
         });
 
         const baseEvent = {
@@ -202,7 +331,7 @@ const LiveEvents = () => {
           timeLeft: calculateTimeLeft(data.startDate, data.endDate),
           startDate: data.startDate,
           endDate: data.endDate,
-          challengeCount: data.challengeCount,
+          challengeCount: challengeCount,
           registeredUsers: data.registeredUsers,
           description: data.description,
           createdBy: data.createdBy,
@@ -221,11 +350,36 @@ const LiveEvents = () => {
             maxParticipants: data.maxIndividuals,
             maxIndividuals: data.maxIndividuals
           });
+        } else if (eventStatus === "ENDED") {
+          // Fetch final scores for past events
+          const finalScores = await fetchFinalScores(doc.id);
+          
+          pastData.push({
+            id: doc.id,
+            name: cleanedName,
+            title: cleanedTitle,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            participants: data.totalParticipants || data.participants?.length || 0,
+            challengeCount: challengeCount,
+            createdBy: data.createdBy,
+            winners: data.winners || [],
+            finalScores: finalScores
+          });
         }
       });
 
+      await Promise.all(eventProcessing);
+
       setLiveEvents(liveData);
       setUpcomingEvents(upcomingData);
+      setPastEvents(pastData);
+
+      // Fetch top players for the first live event
+      if (liveData.length > 0) {
+        const topPlayersData = await fetchTopPlayers(liveData[0].id);
+        setTopPlayers(topPlayersData);
+      }
 
     } catch (err: any) {
       console.error("Error fetching events:", err);
@@ -248,7 +402,10 @@ const LiveEvents = () => {
         throw new Error("Event not found");
       }
 
-      if (!event.registeredUsers?.includes(user.uid)) {
+      // Check if user is already registered
+      const isRegistered = event.registeredUsers?.includes(user.uid);
+      
+      if (!isRegistered) {
         alert("You need to register for this event first before joining");
         return;
       }
@@ -264,12 +421,16 @@ const LiveEvents = () => {
     navigate("/admin");
   };
 
-  const navigateToEventScheduling = () => {
-    navigate("/admin?tab=events");
-  };
-
   const navigateToEventDetails = (eventId: string) => {
     navigate(`/event/${eventId}`);
+  };
+
+  const navigateToLeaderboard = (eventId?: string) => {
+    if (eventId) {
+      navigate(`/leaderboard/${eventId}`);
+    } else {
+      navigate("/leaderboard");
+    }
   };
 
   // Open hosting dialog
@@ -370,6 +531,7 @@ const LiveEvents = () => {
   }
 
   const currentLiveEvent = liveEvents[0];
+  const isUserRegistered = currentLiveEvent?.registeredUsers?.includes(user?.uid || '');
 
   return (
     <>
@@ -567,14 +729,50 @@ const LiveEvents = () => {
                     {currentLiveEvent.description}
                   </p>
                 )}
+                
+                {/* Top Players Preview */}
+                {topPlayers.length > 0 && (
+                  <Card className="mb-4 border-border">
+                    <CardHeader className="p-4 pb-2">
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <Trophy className="w-5 h-5 text-yellow-500" />
+                        Current Top Players
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-2">
+                      <div className="space-y-2">
+                        {topPlayers.map((player) => (
+                          <div key={player.userId} className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              {player.rank === 1 && <Crown className="w-4 h-4 text-yellow-500" />}
+                              {player.rank === 2 && <Medal className="w-4 h-4 text-gray-400" />}
+                              {player.rank === 3 && <Medal className="w-4 h-4 text-amber-600" />}
+                              <span className="font-medium">{player.name}</span>
+                            </div>
+                            <span className="font-bold text-primary">{player.points} pts</span>
+                          </div>
+                        ))}
+                      </div>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="w-full mt-3"
+                        onClick={() => navigateToLeaderboard(currentLiveEvent.id)}
+                      >
+                        View All Ranks
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+
                 <Button 
                   variant="neon" 
                   size="lg" 
                   className="w-full"
-                  onClick={() => joinLiveEvent(currentLiveEvent.id)}
+                  onClick={() => isUserRegistered ? joinLiveEvent(currentLiveEvent.id) : navigateToEventDetails(currentLiveEvent.id)}
                 >
                   <Zap className="w-5 h-5" />
-                  Join Event Now
+                  {isUserRegistered ? "Start Playing Now" : "View Event Details"}
                 </Button>
               </CardContent>
             </Card>
@@ -644,7 +842,7 @@ const LiveEvents = () => {
           )}
 
           {/* Upcoming Events - Simplified Display */}
-          <div className="max-w-4xl mx-auto">
+          <div className="max-w-4xl mx-auto mb-12">
             <h3 className="text-2xl font-bold mb-6">Upcoming Events</h3>
             {upcomingEvents.length === 0 ? (
               <Card className="border-border">
@@ -663,12 +861,24 @@ const LiveEvents = () => {
                   >
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between">
-                        <h4 className="font-bold text-lg">{event.title || event.name}</h4>
-                        {event.createdBy === 'user' && (
-                          <Badge variant="secondary" className="ml-2">
-                            Community Hosted
-                          </Badge>
-                        )}
+                        <div>
+                          <h4 className="font-bold text-lg">{event.title || event.name}</h4>
+                          <p className="text-sm text-muted-foreground">
+                            {event.date} • {event.challengeCount || 0} challenges
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {event.createdBy === 'user' && (
+                            <Badge variant="secondary">
+                              Community Hosted
+                            </Badge>
+                          )}
+                          {event.registered && (
+                            <Badge className="bg-green-500/20 text-green-600">
+                              Registered
+                            </Badge>
+                          )}
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -676,6 +886,92 @@ const LiveEvents = () => {
               </div>
             )}
           </div>
+
+          {/* Past Events */}
+          {pastEvents.length > 0 && (
+            <div className="max-w-4xl mx-auto">
+              <h3 className="text-2xl font-bold mb-6">Past Events</h3>
+              <div className="space-y-4">
+                {pastEvents.map((event) => (
+                  <Card 
+                    key={event.id} 
+                    className="border-border hover:border-primary/30 cursor-pointer transition-colors"
+                    onClick={() => navigateToEventDetails(event.id)}
+                  >
+                    <CardContent className="p-6">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="mb-3">
+                            <h4 className="font-bold text-xl mb-2">{event.title || event.name}</h4>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="bg-gray-100 text-gray-600">
+                                ENDED
+                              </Badge>
+                              {event.createdBy === 'user' && (
+                                <Badge variant="secondary">
+                                  Community Hosted
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+                            <div className="flex items-center gap-2">
+                              <Calendar className="w-4 h-4" />
+                              {formatDate(event.startDate)} - {formatDate(event.endDate)}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Users className="w-4 h-4" />
+                              {event.participants} participants
+                            </div>
+                            {event.challengeCount !== undefined && event.challengeCount > 0 && (
+                              <div className="flex items-center gap-2">
+                                <Zap className="w-4 h-4" />
+                                {event.challengeCount} challenges
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Final Scores for Past Events */}
+                          {event.finalScores && event.finalScores.length > 0 && (
+                            <div className="mt-4 p-4 bg-muted/30 rounded-lg">
+                              <h5 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                                <Trophy className="w-4 h-4 text-yellow-500" />
+                                Final Rankings
+                              </h5>
+                              <div className="space-y-2">
+                                {event.finalScores.slice(0, 5).map((score, index) => (
+                                  <div key={index} className="flex items-center justify-between text-sm">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-medium w-6">#{score.rank}</span>
+                                      <span>{score.name}</span>
+                                    </div>
+                                    <span className="font-bold text-primary">{score.points} pts</span>
+                                  </div>
+                                ))}
+                              </div>
+                              {event.finalScores.length > 5 && (
+                                <p className="text-xs text-muted-foreground mt-2">
+                                  +{event.finalScores.length - 5} more participants
+                                </p>
+                              )}
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="w-full mt-3"
+                                onClick={() => navigateToLeaderboard(event.id)}
+                              >
+                                View Complete Leaderboard
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </section>
       <Footer />
