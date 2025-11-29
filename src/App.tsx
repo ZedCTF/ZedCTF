@@ -19,7 +19,8 @@ import Leaderboard from './components/Leaderboard';
 import GlobalLeaderboard from './components/GlobalLeaderboard';
 import LiveLeaderboard from './components/LiveLeaderboard';
 import AdminDashboard from './components/AdminDashboard';
-import ChallengeDetail from './components/ChallengeDetail';
+import PracticeChallengeDetail from './components/PracticeChallengeDetail';
+import LiveEventChallengeDetail from './components/LiveEventChallengeDetail';
 import UpcomingEventDetails from './components/UpcomingEventDetails';
 import LiveEventDetails from './components/LiveEventDetails';
 import PastEventDetails from './components/PastEventDetails';
@@ -88,13 +89,25 @@ function App() {
                     } 
                   />
                   
-                  {/* Challenge Detail Route - User only */}
+                  {/* Practice Challenge Detail Route - User only */}
                   <Route 
-                    path="/challenge/:challengeId" 
+                    path="/practice/challenge/:challengeId" 
                     element={
                       <ProtectedRoute>
                         <UserOnlyRoute>
-                          <ChallengeDetail />
+                          <PracticeChallengeDetail />
+                        </UserOnlyRoute>
+                      </ProtectedRoute>
+                    } 
+                  />
+                  
+                  {/* Live Event Challenge Detail Route - User only */}
+                  <Route 
+                    path="/live-event/:eventId/challenge/:challengeId" 
+                    element={
+                      <ProtectedRoute>
+                        <UserOnlyRoute>
+                          <LiveEventChallengeDetail />
                         </UserOnlyRoute>
                       </ProtectedRoute>
                     } 

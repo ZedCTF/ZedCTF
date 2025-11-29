@@ -205,8 +205,9 @@ const Practice = () => {
     }
   };
 
+  // FIXED: Updated navigation to use new practice route
   const navigateToChallenge = (challengeId: string) => {
-    navigate(`/challenge/${challengeId}`);
+    navigate(`/practice/challenge/${challengeId}`);
   };
 
   const navigateToLiveEvents = () => {
@@ -290,18 +291,14 @@ const Practice = () => {
                   <div className="text-xs sm:text-sm text-muted-foreground">Challenges</div>
                 </CardContent>
               </Card>
-              {/* === START MODIFIED SECTION === */}
               <Card className="text-center border">
                 <CardContent className="p-2 sm:p-4">
                   <div className="text-lg sm:text-2xl font-bold text-green-600">
-                    {/* Changed calculation to use mySolvesCount */}
                     {mySolvesCount}
                   </div>
-                  {/* Changed label from "Solves" to "My Solves" */}
-                  <div className="text-xs sm:text-sm text-muted-foreground"> My Solves</div> 
+                  <div className="text-xs sm:text-sm text-muted-foreground"> My Solves</div>
                 </CardContent>
               </Card>
-              {/* === END MODIFIED SECTION === */}
               <Card className="text-center border">
                 <CardContent className="p-2 sm:p-4">
                   <div className="text-lg sm:text-2xl font-bold text-blue-600">{categories.length}</div>

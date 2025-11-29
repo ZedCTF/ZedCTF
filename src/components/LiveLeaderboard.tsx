@@ -1,15 +1,15 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Trophy, Target, Users, AlertCircle, Clock, ArrowLeft, Zap, Crown, Medal } from "lucide-react";
+import { Trophy, Target, Users, AlertCircle, Clock, ArrowLeft, Crown, Medal, Shield, Award } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useEffect, useState } from "react";
 import { db } from "../firebase";
-import { collection, query, orderBy, limit, getDocs, where, doc, getDoc } from "firebase/firestore";
+import { collection, query, getDocs, where, doc, getDoc, orderBy } from "firebase/firestore";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 export interface CTFTeam {
   rank: number;
@@ -21,6 +21,7 @@ export interface CTFTeam {
   institution?: string;
   status?: string;
   progress?: string;
+  solvedChallenges: number;
 }
 
 interface LiveEvent {
@@ -28,118 +29,211 @@ interface LiveEvent {
   name: string;
   title?: string;
   status: string;
-  participants: number;
+  participants: string[];
+  registeredUsers?: string[];
   startDate: string;
   endDate: string;
 }
 
 const LiveLeaderboard = () => {
   const navigate = useNavigate();
+  const { eventId } = useParams<{ eventId: string }>();
   const [ctfTeams, setCtfTeams] = useState<CTFTeam[]>([]);
   const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
-  const [selectedEvent, setSelectedEvent] = useState<string>("");
+  const [selectedEvent, setSelectedEvent] = useState<string>(eventId || "");
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [error, setError] = useState<string>("");
 
-  // Fetch live events
+  // Fetch live events - same logic as LiveEventDetails
   const fetchLiveEvents = async () => {
     try {
-      const eventsQuery = query(
-        collection(db, "events"),
-        where("status", "in", ["live", "active", "LIVE"]),
-        orderBy("startDate", "desc")
-      );
-
-      const eventsSnapshot = await getDocs(eventsQuery);
+      console.log("🔍 Fetching live events...");
+      
+      // Get ALL events and filter for live ones
+      const allEventsQuery = query(collection(db, "events"));
+      const allEventsSnapshot = await getDocs(allEventsQuery);
+      
       const eventsData: LiveEvent[] = [];
-
-      eventsSnapshot.forEach((doc) => {
+      
+      allEventsSnapshot.forEach((doc) => {
         const data = doc.data();
-        eventsData.push({
-          id: doc.id,
-          name: data.name,
-          title: data.title,
-          status: data.status,
-          participants: data.participants?.length || data.totalParticipants || 0,
-          startDate: data.startDate,
-          endDate: data.endDate
-        });
+        console.log(`📊 Event: ${data.name}, Status: ${data.status}`);
+        
+        // Include any event that might be considered "live"
+        if (data.status && (
+          data.status === 'LIVE NOW' || 
+          data.status.toLowerCase().includes('live') ||
+          data.status.toLowerCase().includes('active') ||
+          data.status === 'live' ||
+          data.status === 'LIVE'
+        )) {
+          eventsData.push({
+            id: doc.id,
+            name: data.name,
+            title: data.title,
+            status: data.status,
+            participants: data.participants || [],
+            registeredUsers: data.registeredUsers || [],
+            startDate: data.startDate,
+            endDate: data.endDate
+          });
+        }
       });
 
+      console.log("🎯 Live events found:", eventsData);
       setLiveEvents(eventsData);
       
-      // Auto-select first event if available
       if (eventsData.length > 0 && !selectedEvent) {
         setSelectedEvent(eventsData[0].id);
       }
 
       return eventsData;
     } catch (error) {
-      console.error("Error fetching live events:", error);
+      console.error("💥 Error fetching events:", error);
       return [];
     }
   };
 
-  // Fetch event-specific leaderboard data
+  // REAL scoring logic - EXACTLY like LiveEventDetails.tsx
   const fetchEventLeaderboard = async (eventId: string) => {
     if (!eventId) return;
-    
+
     try {
-      // Get event participants
+      console.log("🏆 Fetching leaderboard for event:", eventId);
+      
+      let leaderboardData: CTFTeam[] = [];
+
+      // First, get the event to check participants
       const eventDoc = await getDoc(doc(db, "events", eventId));
       if (!eventDoc.exists()) {
+        console.log("❌ Event not found");
         setCtfTeams([]);
         return;
       }
       
       const eventData = eventDoc.data();
-      const participants = eventData.participants || [];
+      const participants = eventData.participants || eventData.registeredUsers || [];
+      console.log("👥 Event participants:", participants);
       
-      // Fetch user data for each participant and calculate REAL scores
-      const teamData: CTFTeam[] = [];
+      if (participants.length === 0) {
+        console.log("ℹ️ No participants found for this event");
+        setCtfTeams([]);
+        return;
+      }
+
+      // Get ALL challenges that belong to this event
+      const challengesQuery = query(
+        collection(db, "challenges"),
+        where("eventId", "==", eventId)
+      );
+      const challengesSnapshot = await getDocs(challengesQuery);
+      const eventChallengeIds = new Set<string>();
+      const challengePoints: { [key: string]: number } = {};
       
-      for (const userId of participants) {
+      challengesSnapshot.forEach(doc => {
+        const data = doc.data();
+        eventChallengeIds.add(doc.id);
+        challengePoints[doc.id] = data.points || 0;
+      });
+      
+      console.log("🎯 Challenges in event:", Array.from(eventChallengeIds));
+
+      // Get EVENT-SPECIFIC correct submissions by participants
+      const userScores: { [key: string]: CTFTeam } = {};
+      const userChallengeMap: { [key: string]: Set<string> } = {};
+
+      // For each participant, get their EVENT submissions for event challenges
+      for (const participantId of participants) {
+        console.log(`🔍 Processing participant: ${participantId}`);
+        
+        // Get EVENT-SPECIFIC correct submissions by this participant
+        const userSubmissionsQuery = query(
+          collection(db, "submissions"),
+          where("userId", "==", participantId),
+          where("eventId", "==", eventId),
+          where("isCorrect", "==", true)
+        );
+        
+        const userSubmissionsSnapshot = await getDocs(userSubmissionsQuery);
+        let userScore = 0;
+        let solvedCount = 0;
+
+        if (!userChallengeMap[participantId]) {
+          userChallengeMap[participantId] = new Set();
+        }
+
+        userSubmissionsSnapshot.forEach(doc => {
+          const submission = doc.data();
+          const challengeId = submission.challengeId;
+          
+          // Check if this submission is for a challenge in our event
+          if (challengeId && eventChallengeIds.has(challengeId)) {
+            // Only count each challenge once per user
+            if (!userChallengeMap[participantId].has(challengeId)) {
+              const points = submission.pointsAwarded || submission.points || challengePoints[challengeId] || 0;
+              userScore += points;
+              solvedCount += 1;
+              userChallengeMap[participantId].add(challengeId);
+              console.log(`✅ ${participantId} solved ${challengeId} in event: ${points}pts`);
+            }
+          }
+        });
+
+        // Get username
+        let username = "User";
+        let photoURL = "";
+        let role = "Hacker";
+        let institution = "";
+
         try {
-          const userDoc = await getDoc(doc(db, "users", userId));
+          const userDoc = await getDoc(doc(db, "users", participantId));
           if (userDoc.exists()) {
             const userData = userDoc.data();
-            
-            // Get REAL event-specific points
-            const eventPoints = userData.eventPoints?.[eventId] || 0;
-            
-            // Determine status and progress
-            const status = "Active now";
-            const progress = eventPoints > 0 ? "Multiple challenges" : "No challenges solved";
-            
-            // Include all participants, even with 0 points
-            teamData.push({
-              rank: 0, // Will be set after sorting
-              name: userData.displayName || userData.username || userData.email?.split('@')[0] || 'Anonymous',
-              points: eventPoints,
-              userId: userId,
-              photoURL: userData.photoURL,
-              role: userData.role,
-              institution: userData.institution,
-              status: status,
-              progress: progress
-            });
+            username = userData.username || userData.displayName || userData.email?.split('@')[0] || "User";
+            photoURL = userData.photoURL || "";
+            role = userData.role || "Hacker";
+            institution = userData.institution || "";
           }
-        } catch (error) {
-          console.error("Error fetching user data:", error);
+        } catch (userError) {
+          console.log("❌ Could not fetch user data for participant:", participantId);
         }
+
+        // Determine status and progress
+        const status = "Active now";
+        const progress = solvedCount > 0 
+          ? `${solvedCount} challenge${solvedCount !== 1 ? 's' : ''} solved`
+          : "No challenges solved";
+
+        userScores[participantId] = {
+          userId: participantId,
+          name: username,
+          points: userScore,
+          solvedChallenges: solvedCount,
+          rank: 0,
+          photoURL: photoURL,
+          role: role,
+          institution: institution,
+          status: status,
+          progress: progress
+        };
+
+        console.log(`📊 Final event score for ${username}: ${userScore}pts, ${solvedCount} challenges`);
       }
-      
-      // Sort by points and assign ranks
-      const sortedTeams = teamData
+
+      // Sort by score and assign ranks
+      leaderboardData = Object.values(userScores)
         .sort((a, b) => b.points - a.points)
-        .map((team, index) => ({ ...team, rank: index + 1 }));
-        
-      setCtfTeams(sortedTeams);
-      console.log("Real CTF teams data:", sortedTeams);
+        .map((user, index) => ({
+          ...user,
+          rank: index + 1
+        }));
+
+      console.log("🏅 Final event leaderboard:", leaderboardData);
+      setCtfTeams(leaderboardData);
       
     } catch (error) {
-      console.error("Error fetching event leaderboard:", error);
+      console.error("❌ Error fetching event leaderboard:", error);
       setCtfTeams([]);
     }
   };
@@ -147,6 +241,7 @@ const LiveLeaderboard = () => {
   const fetchLeaderboardData = async () => {
     try {
       setError("");
+      setLoading(true);
       
       const events = await fetchLiveEvents();
       
@@ -226,7 +321,11 @@ const LiveLeaderboard = () => {
   };
 
   const navigateBack = () => {
-    navigate("/leaderboard");
+    if (eventId) {
+      navigate(`/live-event/${eventId}`);
+    } else {
+      navigate("/leaderboard");
+    }
   };
 
   const handleEventChange = (eventId: string) => {
@@ -236,13 +335,16 @@ const LiveLeaderboard = () => {
   };
 
   useEffect(() => {
-    fetchLeaderboardData(); // Initial fetch
+    if (eventId) {
+      setSelectedEvent(eventId);
+    }
+    fetchLeaderboardData();
     
     // Auto-refresh every 30 seconds
     const interval = setInterval(fetchLeaderboardData, 30000);
     
     return () => clearInterval(interval);
-  }, [selectedEvent]);
+  }, [selectedEvent, eventId]);
 
   if (loading) {
     return (
@@ -274,16 +376,16 @@ const LiveLeaderboard = () => {
               className="mb-4 -ml-4"
             >
               <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Leaderboards
+              {eventId ? "Back to Event" : "Back to Leaderboards"}
             </Button>
             
             <div className="text-center">
-              <Zap className="w-12 h-12 text-primary mx-auto mb-3 lg:mb-4" />
+              <Shield className="w-12 h-12 text-primary mx-auto mb-3 lg:mb-4" />
               <h2 className="text-2xl lg:text-3xl font-bold mb-2">
                 Live CTF <span className="text-primary">Leaderboard</span>
               </h2>
               <p className="text-muted-foreground text-sm lg:text-base">
-                Real-time competition rankings
+                Real-time competition rankings based on actual challenge solves
               </p>
               {lastUpdated && (
                 <Badge variant="outline" className="mt-2 text-xs">
@@ -319,7 +421,7 @@ const LiveLeaderboard = () => {
                   >
                     {liveEvents.map((event) => (
                       <option key={event.id} value={event.id}>
-                        {event.title || event.name} ({event.participants} participants)
+                        {event.title || event.name} ({event.participants?.length || 0} participants)
                       </option>
                     ))}
                   </select>
@@ -332,7 +434,7 @@ const LiveLeaderboard = () => {
             <CardHeader className="bg-gradient-to-r from-primary/10 to-primary/5 border-b p-4 lg:p-6">
               <CardTitle className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
                 <span className="flex items-center gap-2 text-lg lg:text-xl">
-                  <Target className="w-4 h-4 lg:w-5 lg:h-5 text-primary" />
+                  <Trophy className="w-4 h-4 lg:w-5 lg:h-5 text-primary" />
                   Live Competition Rankings
                   {currentEvent && (
                     <Badge variant="outline" className="ml-2 text-xs">
@@ -341,14 +443,14 @@ const LiveLeaderboard = () => {
                   )}
                 </span>
                 <span className="text-sm text-muted-foreground">
-                  {ctfTeams.length > 0 ? `${ctfTeams.length} Participants` : 'No participants found'}
+                  {ctfTeams.length > 0 ? `${ctfTeams.length} Participant${ctfTeams.length !== 1 ? 's' : ''}` : 'No participants found'}
                 </span>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               {liveEvents.length === 0 ? (
                 <div className="text-center py-12 lg:py-16 text-muted-foreground">
-                  <Zap className="w-16 h-16 lg:w-20 lg:h-20 mx-auto mb-4 opacity-50" />
+                  <Shield className="w-16 h-16 lg:w-20 lg:h-20 mx-auto mb-4 opacity-50" />
                   <p className="text-base lg:text-lg mb-2">No Live Events</p>
                   <p className="text-sm lg:text-base">
                     There are currently no active CTF competitions. Check back later for live events.
@@ -356,11 +458,18 @@ const LiveLeaderboard = () => {
                 </div>
               ) : ctfTeams.length === 0 ? (
                 <div className="text-center py-12 lg:py-16 text-muted-foreground">
-                  <Trophy className="w-16 h-16 lg:w-20 lg:h-20 mx-auto mb-4 opacity-50" />
-                  <p className="text-base lg:text-lg mb-2">No scores available</p>
+                  <Award className="w-16 h-16 lg:w-20 lg:h-20 mx-auto mb-4 opacity-50" />
+                  <p className="text-base lg:text-lg mb-2">No Scores Available</p>
                   <p className="text-sm lg:text-base">
-                    Scores will appear once participants start solving challenges
+                    Scores will appear once participants start solving challenges in this event
                   </p>
+                  {currentEvent && (
+                    <div className="mt-4 text-xs text-muted-foreground">
+                      <p>Current Event: <strong>{currentEvent.name}</strong></p>
+                      <p>Participants: <strong>{currentEvent.participants?.length || 0}</strong></p>
+                      <p>Status: <strong>{currentEvent.status}</strong></p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -401,7 +510,7 @@ const LiveLeaderboard = () => {
                           </div>
                           <div className="flex justify-between items-center text-xs text-muted-foreground">
                             <span>{player.institution || 'No institution'}</span>
-                            <span>{player.status || 'Active'}</span>
+                            <span>{player.solvedChallenges} solved</span>
                           </div>
                           <div className="text-xs text-muted-foreground mt-1">
                             {player.progress || 'No progress'}
@@ -417,9 +526,9 @@ const LiveLeaderboard = () => {
                       <thead className="bg-muted/50">
                         <tr>
                           <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Rank</th>
-                          <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Player/Team</th>
-                          <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Player Name</th>
+                          <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Player</th>
                           <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Points</th>
+                          <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Solved</th>
                           <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Status</th>
                           <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Progress</th>
                         </tr>
@@ -459,13 +568,10 @@ const LiveLeaderboard = () => {
                                     {player.name}
                                   </div>
                                   <div className="text-xs text-muted-foreground">
-                                    {player.role || 'Hacker'}
+                                    {player.role || 'Hacker'} • {player.institution || 'No institution'}
                                   </div>
                                 </div>
                               </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                              {player.name}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="text-xl font-bold text-primary">
@@ -473,12 +579,17 @@ const LiveLeaderboard = () => {
                               </div>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
+                              <Badge variant="outline" className="bg-blue-500/20 text-blue-600 border-blue-200">
+                                {player.solvedChallenges} challenges
+                              </Badge>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
                               <Badge variant="outline" className="bg-green-500/20 text-green-600 border-green-200">
                                 {player.status || 'Active now'}
                               </Badge>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                              {player.progress || 'Multiple challenges'}
+                              {player.progress}
                             </td>
                           </tr>
                         ))}
@@ -496,13 +607,14 @@ const LiveLeaderboard = () => {
               <CardContent className="p-4">
                 <div className="flex items-start gap-3">
                   <div className="p-2 bg-primary/20 rounded-lg mt-1">
-                    <Zap className="w-4 h-4 text-primary" />
+                    <Shield className="w-4 h-4 text-primary" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-sm text-foreground mb-1">About Live CTF Leaderboard</h4>
+                    <h4 className="font-semibold text-sm text-foreground mb-1">Real-time Scoring System</h4>
                     <p className="text-xs text-muted-foreground">
-                      This leaderboard shows real-time rankings for currently active CTF competitions only. 
-                      Scores update automatically as participants solve challenges during the event.
+                      This leaderboard shows REAL scores calculated from actual challenge submissions. 
+                      Points are awarded when registered participants solve challenges in live events. 
+                      Scores update automatically every 30 seconds.
                     </p>
                   </div>
                 </div>

@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Shield, ArrowLeft, Flag, Users, Clock, Star, FileText, Link, Eye, EyeOff, CheckCircle, XCircle, Copy, ExternalLink, Lightbulb } from "lucide-react";
+import { Shield, ArrowLeft, Flag, Users, Clock, Star, FileText, Link, Eye, EyeOff, CheckCircle, XCircle, Copy, ExternalLink, Lightbulb, Calendar, Trophy } from "lucide-react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 
@@ -57,11 +57,19 @@ interface Submission {
   eventId?: string;
 }
 
-const ChallengeDetail = () => {
-  const { challengeId } = useParams<{ challengeId: string }>();
+interface Event {
+  id: string;
+  name: string;
+  title?: string;
+  status: string;
+}
+
+const LiveEventChallengeDetail = () => {
+  const { challengeId, eventId } = useParams<{ challengeId: string; eventId: string }>();
   const navigate = useNavigate();
   const { user } = useAuthContext();
   const [challenge, setChallenge] = useState<Challenge | null>(null);
+  const [event, setEvent] = useState<Event | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [flagInput, setFlagInput] = useState("");
@@ -69,13 +77,16 @@ const ChallengeDetail = () => {
   const [showHints, setShowHints] = useState<boolean[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [activeTab, setActiveTab] = useState("description");
+  const [eventSolves, setEventSolves] = useState<number>(0);
 
   useEffect(() => {
-    if (challengeId) {
+    if (challengeId && eventId) {
       fetchChallenge();
+      fetchEvent();
       fetchSubmissions();
+      fetchEventSolves();
       
-      // Real-time listener for challenge updates (solves count)
+      // Real-time listener for challenge updates
       const challengeRef = doc(db, "challenges", challengeId);
       const unsubscribe = onSnapshot(challengeRef, (doc) => {
         if (doc.exists()) {
@@ -89,12 +100,12 @@ const ChallengeDetail = () => {
       
       return () => unsubscribe();
     }
-  }, [challengeId]);
+  }, [challengeId, eventId]);
 
   const fetchChallenge = async () => {
     try {
       setLoading(true);
-      console.log("🔄 Fetching challenge:", challengeId);
+      console.log("🔄 Fetching event challenge:", challengeId, "for event:", eventId);
       
       const challengeDoc = await getDoc(doc(db, "challenges", challengeId!));
       
@@ -103,8 +114,7 @@ const ChallengeDetail = () => {
           id: challengeDoc.id,
           ...challengeDoc.data()
         } as Challenge;
-        console.log("✅ Challenge found:", challengeData);
-        console.log("🎯 Challenge eventId:", challengeData.eventId);
+        console.log("✅ Event challenge found:", challengeData);
         setChallenge(challengeData);
         
         // Initialize hints visibility
@@ -123,14 +133,33 @@ const ChallengeDetail = () => {
     }
   };
 
-  const fetchSubmissions = async () => {
-    if (!user || !challengeId) return;
+  const fetchEvent = async () => {
+    if (!eventId) return;
 
     try {
+      const eventDoc = await getDoc(doc(db, "events", eventId));
+      if (eventDoc.exists()) {
+        const eventData = {
+          id: eventDoc.id,
+          ...eventDoc.data()
+        } as Event;
+        setEvent(eventData);
+      }
+    } catch (error) {
+      console.error("Error fetching event:", error);
+    }
+  };
+
+  const fetchSubmissions = async () => {
+    if (!user || !challengeId || !eventId) return;
+
+    try {
+      // Fetch only event-specific submissions
       const submissionsQuery = query(
         collection(db, "submissions"),
         where("challengeId", "==", challengeId),
         where("userId", "==", user.uid),
+        where("eventId", "==", eventId), // Only event submissions
         orderBy("submittedAt", "desc")
       );
 
@@ -140,19 +169,71 @@ const ChallengeDetail = () => {
         ...doc.data()
       })) as Submission[];
 
+      console.log("📊 Event submissions found:", submissionsData.length);
       setSubmissions(submissionsData);
     } catch (error) {
-      console.error("Error fetching submissions:", error);
+      console.error("Error fetching event submissions:", error);
     }
   };
 
-  // Check if user has already solved this challenge and received points
-  const hasUserSolvedAndReceivedPoints = async (userId: string, challengeId: string): Promise<boolean> => {
+  // Fetch only event-specific solves (not practice solves)
+  const fetchEventSolves = async () => {
+    if (!challengeId || !eventId) return;
+
+    try {
+      const submissionsQuery = query(
+        collection(db, "submissions"),
+        where("challengeId", "==", challengeId),
+        where("eventId", "==", eventId),
+        where("isCorrect", "==", true)
+      );
+
+      const submissionsSnapshot = await getDocs(submissionsQuery);
+      
+      // Use Set to count unique users who solved in this event
+      const uniqueSolvers = new Set<string>();
+      submissionsSnapshot.forEach(doc => {
+        const submission = doc.data();
+        if (submission.userId) {
+          uniqueSolvers.add(submission.userId);
+        }
+      });
+
+      console.log(`🎯 Event solves for challenge ${challengeId}: ${uniqueSolvers.size}`);
+      setEventSolves(uniqueSolvers.size);
+    } catch (error) {
+      console.error("Error fetching event solves:", error);
+      setEventSolves(0);
+    }
+  };
+
+  // Check if user has already solved this challenge in the event
+  const hasUserSolvedInEvent = async (userId: string, challengeId: string, eventId: string): Promise<boolean> => {
     try {
       const submissionsQuery = query(
         collection(db, "submissions"),
         where("challengeId", "==", challengeId),
         where("userId", "==", userId),
+        where("eventId", "==", eventId),
+        where("isCorrect", "==", true)
+      );
+
+      const submissionsSnapshot = await getDocs(submissionsQuery);
+      return !submissionsSnapshot.empty;
+    } catch (error) {
+      console.error("Error checking event solve status:", error);
+      return false;
+    }
+  };
+
+  // Check if user has received points for this solve in the event
+  const hasUserReceivedPointsInEvent = async (userId: string, challengeId: string, eventId: string): Promise<boolean> => {
+    try {
+      const submissionsQuery = query(
+        collection(db, "submissions"),
+        where("challengeId", "==", challengeId),
+        where("userId", "==", userId),
+        where("eventId", "==", eventId),
         where("isCorrect", "==", true),
         where("pointsAwarded", ">", 0)
       );
@@ -160,13 +241,20 @@ const ChallengeDetail = () => {
       const submissionsSnapshot = await getDocs(submissionsQuery);
       return !submissionsSnapshot.empty;
     } catch (error) {
-      console.error("Error checking user solve status:", error);
+      console.error("Error checking event points status:", error);
       return false;
     }
   };
 
   const submitFlag = async () => {
-    if (!challenge || !user || !flagInput.trim()) return;
+    if (!challenge || !user || !flagInput.trim() || !eventId) return;
+
+    // Enhanced check if already solved in this event
+    const alreadySolvedInEvent = await hasUserSolvedInEvent(user.uid, challenge.id, eventId);
+    if (alreadySolvedInEvent) {
+      setMessage({ type: 'error', text: 'You have already solved this challenge in the event. No additional points can be awarded.' });
+      return;
+    }
 
     setSubmitting(true);
     setMessage(null);
@@ -186,16 +274,19 @@ const ChallengeDetail = () => {
         isCorrect = challenge.flag?.trim() === flagInput.trim();
       }
 
-      // Check if user has already solved this challenge and received points
-      const alreadySolvedWithPoints = await hasUserSolvedAndReceivedPoints(user.uid, challenge.id);
+      // Check if user has already solved this challenge in the event
+      const alreadySolvedInEvent = await hasUserSolvedInEvent(user.uid, challenge.id, eventId);
       
-      // Determine points to award (0 if already solved, full points if first time)
+      // Check if user has received points in the event
+      const alreadyReceivedPoints = await hasUserReceivedPointsInEvent(user.uid, challenge.id, eventId);
+      
+      // Determine points to award (0 if already solved in event, full points if first time)
       let pointsToAward = 0;
-      if (isCorrect && !alreadySolvedWithPoints) {
+      if (isCorrect && !alreadyReceivedPoints) {
         pointsToAward = challenge.points || 0;
       }
 
-      // Record submission - CRITICAL: Include eventId if challenge belongs to an event
+      // Record EVENT submission (with eventId)
       const submissionData: any = {
         challengeId: challenge.id,
         challengeTitle: challenge.title,
@@ -205,18 +296,12 @@ const ChallengeDetail = () => {
         isCorrect: isCorrect,
         submittedAt: new Date(),
         pointsAwarded: pointsToAward,
-        points: pointsToAward, // Also include as 'points' for compatibility
-        username: user.displayName || user.email?.split('@')[0] || 'User'
+        points: pointsToAward,
+        username: user.displayName || user.email?.split('@')[0] || 'User',
+        eventId: eventId // Include eventId for event submissions
       };
 
-      // ADD THIS: Include eventId if the challenge belongs to an event
-      if (challenge.eventId) {
-        submissionData.eventId = challenge.eventId;
-        console.log(`🎯 Adding eventId to submission: ${challenge.eventId}`);
-      } else {
-        console.log(`⚠️ Challenge ${challenge.id} has no eventId`);
-      }
-
+      console.log(`🎯 Creating EVENT submission for event: ${eventId}`);
       await addDoc(collection(db, "submissions"), submissionData);
 
       if (isCorrect) {
@@ -238,13 +323,14 @@ const ChallengeDetail = () => {
         setMessage({ 
           type: 'success', 
           text: pointsToAward > 0 
-            ? `Congratulations! Flag is correct! +${pointsToAward} points awarded!`
-            : 'Congratulations! Flag is correct! (No additional points - already solved)'
+            ? `Congratulations! Flag is correct! +${pointsToAward} points awarded for event!`
+            : 'Congratulations! Flag is correct! (No additional points - already solved in event)'
         });
         setFlagInput("");
         
-        // Refresh submissions
+        // Refresh submissions and event solves
         fetchSubmissions();
+        fetchEventSolves();
       } else {
         setMessage({ type: 'error', text: 'Incorrect flag. Please try again.' });
       }
@@ -262,16 +348,55 @@ const ChallengeDetail = () => {
     setShowHints(newShowHints);
   };
 
-  const navigateToPractice = () => {
-    navigate("/practice");
+  const navigateToEvent = () => {
+    // Use the correct route for live events
+    navigate(`/event/live/${eventId}`);
+  };
+
+  const navigateToLeaderboard = () => {
+    navigate(`/live-leaderboard/${eventId}`);
   };
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    // You could add a toast notification here
   };
 
-  const isSolved = challenge?.solvedBy?.includes(user?.uid || '');
+  // Check if solved in event
+  const isSolvedInEvent = submissions.some(sub => sub.isCorrect);
+
+  // Calculate if user received points for this solve in event
+  const userReceivedPointsInEvent = submissions.some(sub => 
+    sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0
+  );
+
+  // Function to format date properly
+  const formatDate = (date: any) => {
+    if (!date) return '';
+    
+    try {
+      const dateObj = date?.toDate ? date.toDate() : new Date(date);
+      
+      // Check if date is valid
+      if (isNaN(dateObj.getTime())) {
+        return '';
+      }
+      
+      // Return empty string for dates in 2025 (likely placeholder)
+      if (dateObj.getFullYear() === 2025) {
+        return '';
+      }
+      
+      // Format as "Nov 26, 2024" if it's a real date
+      return dateObj.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return '';
+    }
+  };
 
   // Function to render challenge content with proper formatting
   const renderChallengeContent = () => {
@@ -335,9 +460,6 @@ const ChallengeDetail = () => {
     return content;
   };
 
-  // Calculate if user received points for this solve
-  const userReceivedPoints = submissions.some(sub => sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0);
-
   if (loading) {
     return (
       <>
@@ -346,7 +468,7 @@ const ChallengeDetail = () => {
           <div className="container mx-auto px-4 py-6">
             <div className="text-center py-8">
               <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto"></div>
-              <p className="mt-2 text-sm text-muted-foreground">Loading challenge...</p>
+              <p className="mt-2 text-sm text-muted-foreground">Loading event challenge...</p>
             </div>
           </div>
         </div>
@@ -368,9 +490,9 @@ const ChallengeDetail = () => {
                 <p className="text-muted-foreground text-sm mb-4">
                   The challenge you're looking for doesn't exist or you don't have permission to view it.
                 </p>
-                <Button onClick={navigateToPractice} variant="terminal" size="sm">
+                <Button onClick={navigateToEvent} variant="terminal" size="sm">
                   <ArrowLeft className="w-3 h-3 mr-1" />
-                  Back to Practice
+                  Back to Event
                 </Button>
               </CardContent>
             </Card>
@@ -403,50 +525,66 @@ const ChallengeDetail = () => {
     return colors[category] || "bg-gray-500/20 text-gray-600 border-gray-200";
   };
 
+  const formattedDate = formatDate(challenge.createdAt);
+
   return (
     <>
       <Navbar />
       <div className="min-h-screen bg-background pt-16">
         <div className="container mx-auto px-4 py-6">
-          {/* Mobile-optimized header */}
+          {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
             <div className="flex items-center gap-2">
               <Button 
                 variant="ghost" 
-                onClick={navigateToPractice} 
+                onClick={navigateToEvent} 
                 size="sm" 
                 className="h-8 px-2 sm:px-3 -ml-2"
               >
                 <ArrowLeft className="w-3 h-3 mr-1" />
-                <span className="hidden sm:inline">Back to Practice</span>
+                <span className="hidden sm:inline">Back to Event</span>
                 <span className="sm:hidden">Back</span>
               </Button>
               <h1 className="text-lg sm:text-xl font-bold truncate">{challenge.title}</h1>
             </div>
             
             <div className="flex items-center gap-2 flex-wrap">
-              {isSolved && (
+              {isSolvedInEvent && (
                 <Badge className="bg-green-500/20 text-green-600 border-green-200 text-xs">
                   <CheckCircle className="w-3 h-3 mr-1" />
-                  {userReceivedPoints ? 'Solved + Points' : 'Solved'}
+                  {userReceivedPointsInEvent ? 'Solved + Points' : 'Solved'}
                 </Badge>
               )}
-              {challenge.featuredOnPractice && (
-                <Badge className="bg-yellow-500/20 text-yellow-600 border-yellow-200 text-xs">
-                  <Star className="w-3 h-3 mr-1" />
-                  Featured
-                </Badge>
-              )}
-              {challenge.eventId && (
-                <Badge className="bg-blue-500/20 text-blue-600 border-blue-200 text-xs">
-                  <Shield className="w-3 h-3 mr-1" />
-                  Event Challenge
+              <Badge className="bg-blue-500/20 text-blue-600 border-blue-200 text-xs">
+                <Calendar className="w-3 h-3 mr-1" />
+                Event Challenge
+              </Badge>
+              {event && (
+                <Badge variant="outline" className="text-xs">
+                  {event.title || event.name}
                 </Badge>
               )}
             </div>
           </div>
 
-          {/* Mobile-optimized challenge info */}
+          {/* Event Banner */}
+          {event && (
+            <Card className="mb-4 border border-blue-200 bg-blue-50">
+              <CardContent className="p-3">
+                <div className="flex items-center gap-2 text-blue-800">
+                  <Calendar className="w-4 h-4" />
+                  <span className="text-sm font-medium">
+                    Solving for Event: {event.title || event.name}
+                  </span>
+                </div>
+                <p className="text-xs text-blue-600 mt-1">
+                  This submission will count towards the event leaderboard and prize distribution.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Challenge info */}
           <Card className="mb-4 border">
             <CardContent className="p-3 sm:p-4">
               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -461,22 +599,17 @@ const ChallengeDetail = () => {
                 </Badge>
                 <div className="flex items-center gap-1 text-muted-foreground">
                   <Users className="w-3 h-3" />
-                  <span>{challenge.solvedBy?.length || 0} solves</span>
+                  <span>{eventSolves} solves</span>
                 </div>
-                <div className="flex items-center gap-1 text-muted-foreground">
-                  <Clock className="w-3 h-3" />
-                  <span className="hidden sm:inline">
-                    {challenge.createdAt?.toDate?.()?.toLocaleDateString() || 
-                     new Date(challenge.createdAt).toLocaleDateString()}
-                  </span>
-                  <span className="sm:hidden">
-                    {challenge.createdAt?.toDate?.()?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) || 
-                     new Date(challenge.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                  </span>
-                </div>
+                {formattedDate && (
+                  <div className="flex items-center gap-1 text-muted-foreground">
+                    <Clock className="w-3 h-3" />
+                    <span>{formattedDate}</span>
+                  </div>
+                )}
               </div>
               
-              {/* Creator info - stacked on mobile */}
+              {/* Creator info */}
               <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mt-2 text-xs text-muted-foreground">
                 <div>By: {challenge.createdByName || 'Unknown'}</div>
                 {challenge.originalCreator && (
@@ -487,7 +620,7 @@ const ChallengeDetail = () => {
                         href={challenge.originalCreator.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-primary hover:underline"
+                        className="flex items-center gap-1 text-primary underline"
                       >
                         {challenge.originalCreator.name}
                         <ExternalLink className="w-3 h-3" />
@@ -497,29 +630,23 @@ const ChallengeDetail = () => {
                     )}
                   </div>
                 )}
-                {challenge.eventId && (
-                  <div className="flex items-center gap-1">
-                    <span>Event ID: {challenge.eventId}</span>
-                  </div>
-                )}
               </div>
             </CardContent>
           </Card>
 
-          {/* Mobile-optimized main content - Stack tabs vertically on mobile */}
+          {/* Main Content */}
           <div className="flex flex-col lg:grid lg:grid-cols-3 gap-4">
             {/* Main Content - Full width on mobile */}
             <div className="lg:col-span-2 space-y-4">
-              {/* Mobile-optimized tabs with better spacing */}
+              {/* Tabs */}
               <div className="w-full">
-                {/* Tabs Header - Horizontal scroll on mobile if needed */}
                 <div className="flex overflow-x-auto scrollbar-hide mb-4 bg-muted/30 rounded-lg p-1">
                   <button
                     onClick={() => setActiveTab("description")}
                     className={`flex-1 min-w-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                       activeTab === "description" 
                         ? "bg-background text-foreground shadow-sm" 
-                        : "text-muted-foreground hover:text-foreground"
+                        : "text-muted-foreground"
                     }`}
                   >
                     Description
@@ -529,7 +656,7 @@ const ChallengeDetail = () => {
                     className={`flex-1 min-w-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                       activeTab === "hints" 
                         ? "bg-background text-foreground shadow-sm" 
-                        : "text-muted-foreground hover:text-foreground"
+                        : "text-muted-foreground"
                     }`}
                   >
                     Hints ({challenge.hints?.length || 0})
@@ -539,7 +666,7 @@ const ChallengeDetail = () => {
                     className={`flex-1 min-w-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                       activeTab === "files" 
                         ? "bg-background text-foreground shadow-sm" 
-                        : "text-muted-foreground hover:text-foreground"
+                        : "text-muted-foreground"
                     }`}
                   >
                     Files ({(challenge.files?.length || 0)})
@@ -562,7 +689,7 @@ const ChallengeDetail = () => {
                                   <p className="mb-2 text-xs text-muted-foreground break-words">{question.question}</p>
                                   <div className="flex items-center justify-between text-xs">
                                     <span className="font-mono font-semibold">{question.points} points</span>
-                                    {challenge.solvedBy?.includes(user?.uid || '') && (
+                                    {isSolvedInEvent && (
                                       <Badge variant="outline" className="font-mono text-xs">
                                         Flag: {question.flag}
                                       </Badge>
@@ -583,7 +710,7 @@ const ChallengeDetail = () => {
                                 </div>
                               )}
                               
-                              {isSolved && challenge.flag && (
+                              {isSolvedInEvent && challenge.flag && (
                                 <div className="p-3 bg-green-500/10 border border-green-200 rounded break-words">
                                   <div className="flex items-center justify-between gap-2">
                                     <p className="text-xs text-green-600 font-mono break-all flex-1">
@@ -664,7 +791,7 @@ const ChallengeDetail = () => {
                                 href={file.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="flex items-center gap-2 p-3 text-sm border rounded hover:bg-accent transition-colors"
+                                className="flex items-center gap-2 p-3 text-sm border rounded transition-colors"
                               >
                                 {file.type === 'file' ? (
                                   <FileText className="w-4 h-4" />
@@ -688,14 +815,17 @@ const ChallengeDetail = () => {
               </div>
             </div>
 
-            {/* Sidebar - Full width on mobile, sticky on desktop */}
+            {/* Sidebar */}
             <div className="space-y-4">
-              {/* Flag Submission - Mobile optimized */}
+              {/* Flag Submission */}
               <Card className="border lg:sticky lg:top-4">
                 <CardHeader className="p-4 pb-2">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Flag className="w-4 h-4" />
                     Submit Flag
+                    <Badge variant="outline" className="text-xs bg-blue-500/20 text-blue-600">
+                      Event
+                    </Badge>
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 pt-2 space-y-3">
@@ -712,7 +842,7 @@ const ChallengeDetail = () => {
                     </Alert>
                   )}
 
-                  {!isSolved ? (
+                  {!isSolvedInEvent ? (
                     <div className="space-y-2">
                       <div className="space-y-1">
                         <Label htmlFor="flag" className="text-xs font-medium">Enter Flag</Label>
@@ -749,21 +879,59 @@ const ChallengeDetail = () => {
                       <CheckCircle className="w-8 h-8 text-green-600 mx-auto mb-1" />
                       <p className="text-green-600 font-semibold text-sm">Challenge Solved!</p>
                       <p className="text-green-600 text-xs mt-1">
-                        {userReceivedPoints 
-                          ? `+${challenge.totalPoints || challenge.points} points awarded`
-                          : 'Already solved - no additional points'
+                        {userReceivedPointsInEvent 
+                          ? `+${challenge.totalPoints || challenge.points} points awarded for event`
+                          : 'Already solved in event - no additional points'
                         }
+                      </p>
+                      <p className="text-green-600 text-xs mt-2 font-medium">
+                        This challenge is now locked
                       </p>
                     </div>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Submission History - Mobile optimized */}
+              {/* Live Leaderboard Link */}
+              <Card className="border">
+                <CardHeader className="p-4 pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Trophy className="w-4 h-4" />
+                    Live Leaderboard
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-4 pt-2">
+                  <div className="text-center space-y-3">
+                    <div className="p-3 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 rounded-lg">
+                      <Trophy className="w-8 h-8 text-primary mx-auto mb-2" />
+                      <p className="text-sm font-medium text-foreground mb-1">
+                        View Live Rankings
+                      </p>
+                      <p className="text-xs text-muted-foreground mb-3">
+                        See real-time scores and rankings for all participants in this event
+                      </p>
+                      <Button 
+                        onClick={navigateToLeaderboard}
+                        variant="terminal"
+                        className="w-full"
+                        size="sm"
+                      >
+                        <Trophy className="w-3 h-3 mr-2" />
+                        View Leaderboard
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Leaderboard updates automatically as participants solve challenges
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Submission History */}
               {submissions.length > 0 && (
                 <Card className="border">
                   <CardHeader className="p-4 pb-2">
-                    <CardTitle className="text-base">Submission History</CardTitle>
+                    <CardTitle className="text-base">Event Submission History</CardTitle>
                   </CardHeader>
                   <CardContent className="p-4 pt-2">
                     <div className="space-y-1 max-h-48 overflow-y-auto">
@@ -801,4 +969,4 @@ const ChallengeDetail = () => {
   );
 };
 
-export default ChallengeDetail;
+export default LiveEventChallengeDetail;
