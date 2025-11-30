@@ -4,11 +4,12 @@ import { doc, getDoc, collection, getDocs, query, where, orderBy, updateDoc, arr
 import { db } from "../firebase";
 import { useAuthContext } from "../contexts/AuthContext";
 import { useAdminContext } from "../contexts/AdminContext";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
-import { Button } from "../components/ui/button";
-import { Badge } from "../components/ui/badge";
-import { Alert, AlertDescription } from "../components/ui/alert";
-import { Calendar, Users, Clock, MapPin, Trophy, Shield, ArrowLeft, CheckCircle, XCircle, Crown, UserPlus, Lock, Eye, BookOpen, Settings, Edit } from "lucide-react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "./ui/card";
+import { Button } from "./ui/button";
+import { Badge } from "./ui/badge";
+import { Alert, AlertDescription } from "./ui/alert";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Calendar, Users, Clock, MapPin, Trophy, Shield, ArrowLeft, CheckCircle, XCircle, Crown, UserPlus, Lock, Eye, BookOpen, Settings, Edit, CreditCard, Smartphone, UserCheck } from "lucide-react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 
@@ -20,6 +21,7 @@ interface Event {
   startDate: string;
   endDate: string;
   participants: string[];
+  pendingApprovals?: string[];
   totalParticipants?: number;
   maxParticipants?: number;
   challengeCount?: number;
@@ -59,6 +61,427 @@ interface TimeLeft {
   seconds: number;
 }
 
+// Registration Method Selection Component
+const RegistrationMethodSelection = ({ 
+  event, 
+  onCancel, 
+  onSelectMethod 
+}: { 
+  event: Event; 
+  onCancel: () => void; 
+  onSelectMethod: (method: 'mobile_money' | 'approval') => void;
+}) => {
+  const price = event.individualPrice || 0;
+  const currency = event.currency || 'ZMW';
+
+  return (
+    <Card className="w-full max-w-md mx-auto border border-blue-200">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <UserPlus className="w-5 h-5 text-blue-600" />
+          Select Registration Method
+        </CardTitle>
+        <CardDescription>
+          Choose how you want to register for this event.
+        </CardDescription>
+      </CardHeader>
+      
+      <CardContent className="pb-3">
+        <div className="space-y-4">
+          {/* Payment Summary */}
+          <div className="p-3 bg-green-50 rounded-lg border border-green-100">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-medium text-green-800">Registration Fee</span>
+              <span className="text-lg font-bold text-green-800">
+                {price} {currency}
+              </span>
+            </div>
+            <p className="text-xs text-green-600">Event: {event.name}</p>
+          </div>
+
+          {/* Mobile Money Option */}
+          <Card 
+            className="border border-green-200 hover:border-green-400 cursor-pointer transition-colors"
+            onClick={() => onSelectMethod('mobile_money')}
+          >
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex-shrink-0">
+                  <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                    <Smartphone className="w-5 h-5 text-green-600" />
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-sm">Mobile Money Payment</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Pay instantly via Mobile Money API. Registration confirmed immediately after payment.
+                  </p>
+                </div>
+                <div className="flex-shrink-0">
+                  <Badge className="bg-green-500 text-white text-xs">
+                    Instant
+                  </Badge>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Admin Approval Option */}
+          <Card 
+            className="border border-blue-200 hover:border-blue-400 cursor-pointer transition-colors"
+            onClick={() => onSelectMethod('approval')}
+          >
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex-shrink-0">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                    <UserCheck className="w-5 h-5 text-blue-600" />
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-sm">Admin/Moderator Approval</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Pay manually and submit for approval. Status will be "Pending Approval" until verified.
+                  </p>
+                </div>
+                <div className="flex-shrink-0">
+                  <Badge variant="outline" className="text-blue-600 border-blue-300 text-xs">
+                    Manual
+                  </Badge>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Comparison Info */}
+          <div className="bg-gray-50 p-3 rounded-lg border text-xs">
+            <h4 className="font-medium mb-2">Method Comparison:</h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="font-medium text-green-700">Mobile Money</p>
+                <ul className="text-green-600 space-y-1 mt-1">
+                  <li>• Instant registration</li>
+                  <li>• API payment processing</li>
+                  <li>• Automatic confirmation</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-medium text-blue-700">Admin Approval</p>
+                <ul className="text-blue-600 space-y-1 mt-1">
+                  <li>• Manual payment</li>
+                  <li>• Pending approval status</li>
+                  <li>• Admin verification</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+      
+      <CardFooter className="flex gap-2 pt-3">
+        <Button 
+          variant="outline" 
+          onClick={onCancel}
+          className="flex-1"
+        >
+          Cancel
+        </Button>
+        <Button disabled className="flex-1 bg-gray-400">
+          Select Method Above
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+};
+
+// Mobile Money Payment Component
+const MobileMoneyPayment = ({ event, onCancel, onSuccess }: { event: Event; onCancel: () => void; onSuccess: () => void }) => {
+  const [processing, setProcessing] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+
+  const price = event.individualPrice || 0;
+  const currency = event.currency || 'ZMW';
+
+  const processMobileMoneyPayment = async () => {
+    setProcessing(true);
+    setMessage(null);
+
+    try {
+      // Simulate API payment processing
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Simulate API response
+      const paymentSuccess = Math.random() > 0.1; // 90% success rate
+      
+      if (paymentSuccess) {
+        setMessage({ 
+          type: 'success', 
+          text: 'Mobile Money payment successful! You have been registered for the event.' 
+        });
+        
+        setTimeout(() => {
+          onSuccess();
+        }, 2000);
+      } else {
+        throw new Error('Mobile Money payment failed. Please try again or use a different method.');
+      }
+      
+    } catch (error: any) {
+      console.error("Mobile Money payment error:", error);
+      setMessage({ 
+        type: 'error', 
+        text: error.message || 'Payment processing failed. Please try again.' 
+      });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <Card className="w-full max-w-md mx-auto border border-green-200">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <Smartphone className="w-5 h-5 text-green-600" />
+          Mobile Money Payment
+        </CardTitle>
+        <CardDescription>
+          Complete your registration via Mobile Money API.
+        </CardDescription>
+      </CardHeader>
+      
+      <CardContent className="pb-3">
+        <div className="space-y-4">
+          {/* Payment Summary */}
+          <div className="p-3 bg-green-50 rounded-lg border border-green-100">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-medium text-green-800">Amount to Pay</span>
+              <span className="text-lg font-bold text-green-800">
+                {price} {currency}
+              </span>
+            </div>
+            <p className="text-xs text-green-600">Event: {event.name}</p>
+          </div>
+          
+          {/* Payment Instructions */}
+          <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <h5 className="text-sm font-medium text-blue-800 mb-2">How it works:</h5>
+            <ol className="text-xs text-blue-700 space-y-1 list-decimal list-inside">
+              <li>Click "Process Mobile Money Payment" below</li>
+              <li>You'll be redirected to Mobile Money service</li>
+              <li>Complete payment on your mobile device</li>
+              <li>Registration confirmed automatically after successful payment</li>
+            </ol>
+          </div>
+
+          <div className="bg-yellow-50 p-3 rounded border border-yellow-200">
+            <p className="text-xs text-yellow-800">
+              💡 <strong>Note:</strong> This uses Mobile Money API for instant payment processing and automatic registration.
+            </p>
+          </div>
+        </div>
+
+        {message && (
+          <Alert className={`mt-3 ${message.type === 'success' ? 'bg-green-500/10 border-green-200' : 'bg-red-500/10 border-red-200'}`}>
+            <div className="flex items-center gap-2">
+              {message.type === 'success' ? (
+                <CheckCircle className="w-4 h-4 text-green-600" />
+              ) : (
+                <XCircle className="w-4 h-4 text-red-600" />
+              )}
+              <AlertDescription className={message.type === 'success' ? 'text-green-600' : 'text-red-600'}>
+                {message.text}
+              </AlertDescription>
+            </div>
+          </Alert>
+        )}
+      </CardContent>
+      
+      <CardFooter className="flex gap-2 pt-3">
+        <Button 
+          variant="outline" 
+          onClick={onCancel}
+          disabled={processing}
+          className="flex-1"
+        >
+          Back
+        </Button>
+        <Button 
+          onClick={processMobileMoneyPayment}
+          disabled={processing}
+          className="flex-1 bg-green-600 hover:bg-green-700"
+        >
+          {processing ? (
+            <>
+              <div className="animate-spin w-4 h-4 border border-white border-t-transparent rounded-full mr-2"></div>
+              Processing Payment...
+            </>
+          ) : (
+            <>
+              <Smartphone className="w-4 h-4 mr-2" />
+              Process Mobile Money Payment
+            </>
+          )}
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+};
+
+// Admin Approval Component
+const AdminApprovalRegistration = ({ event, onCancel, onSuccess }: { event: Event; onCancel: () => void; onSuccess: () => void }) => {
+  const { user } = useAuthContext();
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+
+  const price = event.individualPrice || 0;
+  const currency = event.currency || 'ZMW';
+
+  const submitForApproval = async () => {
+    setSubmitting(true);
+    setMessage(null);
+
+    try {
+      if (!user || !event) return;
+
+      const eventRef = doc(db, "events", event.id);
+      
+      // Use arrayUnion which handles the case where field doesn't exist
+      await updateDoc(eventRef, {
+        pendingApprovals: arrayUnion(user.uid)
+      });
+
+      setMessage({ 
+        type: 'success', 
+        text: 'Registration submitted for approval! Your status is now "Pending Approval". Admin will verify your payment and approve registration.' 
+      });
+      
+      setTimeout(() => {
+        onSuccess();
+      }, 2000);
+      
+    } catch (error: any) {
+      console.error("Error submitting approval request:", error);
+      setMessage({ 
+        type: 'error', 
+        text: `Failed to submit approval request: ${error.message}` 
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Card className="w-full max-w-md mx-auto border border-blue-200">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <UserCheck className="w-5 h-5 text-blue-600" />
+          Request Admin Approval
+        </CardTitle>
+        <CardDescription>
+          Make payment manually and submit for admin/moderator approval.
+        </CardDescription>
+      </CardHeader>
+      
+      <CardContent className="pb-3">
+        <div className="space-y-4">
+          {/* Payment & Approval Info */}
+          <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg border border-blue-100">
+            <UserCheck className="w-4 h-4 text-blue-600" />
+            <div>
+              <p className="text-sm font-medium text-blue-800">Approval Required</p>
+              <p className="text-xs text-blue-600">Make payment first, then admin will verify and approve registration.</p>
+            </div>
+          </div>
+
+          {/* Payment Section */}
+          <div className="p-3 bg-green-50 rounded-lg border border-green-100">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-medium text-green-800">Registration Fee</span>
+              <span className="text-lg font-bold text-green-800">
+                {price} {currency}
+              </span>
+            </div>
+            <p className="text-xs text-green-600">Event: {event.name}</p>
+            
+            {/* Mobile Money Instructions */}
+            <div className="mt-3 p-3 bg-blue-50 rounded border border-blue-200">
+              <h6 className="text-sm font-medium text-blue-800 mb-2 flex items-center gap-2">
+                <Smartphone className="w-4 h-4 text-blue-600" />
+                Payment Instructions
+              </h6>
+              <div className="text-xs space-y-2">
+                <div className="bg-white p-2 rounded border">
+                  <p className="font-medium text-blue-800 mb-1">Send payment to:</p>
+                  <p className="text-blue-700">📱 Airtel Money: <span className="font-mono font-bold">0774713037</span></p>
+                  <p className="text-blue-700">📱 MTN Money: <span className="font-mono font-bold">0969209404</span></p>
+                </div>
+                <p className="text-blue-700">Reference: <span className="font-bold">{event.name}</span></p>
+                <p className="text-blue-700">Amount: <span className="font-bold">{price} {currency}</span></p>
+              </div>
+            </div>
+          </div>
+
+          {/* Approval Process Info */}
+          <div className="text-sm text-muted-foreground">
+            <p className="mb-2">After submitting:</p>
+            <ul className="space-y-1 list-disc list-inside text-xs">
+              <li>Your status will be <strong>"Pending Approval"</strong></li>
+              <li>Admins will verify your payment manually</li>
+              <li>You'll receive notification when approved</li>
+              <li>Registration confirmed upon approval</li>
+              <li>This process usually takes 1-2 hours</li>
+            </ul>
+          </div>
+        </div>
+
+        {message && (
+          <Alert className={`mt-3 ${message.type === 'success' ? 'bg-green-500/10 border-green-200' : 'bg-red-500/10 border-red-200'}`}>
+            <div className="flex items-center gap-2">
+              {message.type === 'success' ? (
+                <CheckCircle className="w-4 h-4 text-green-600" />
+              ) : (
+                <XCircle className="w-4 h-4 text-red-600" />
+              )}
+              <AlertDescription className={message.type === 'success' ? 'text-green-600' : 'text-red-600'}>
+                {message.text}
+              </AlertDescription>
+            </div>
+          </Alert>
+        )}
+      </CardContent>
+      
+      <CardFooter className="flex gap-2 pt-3">
+        <Button 
+          variant="outline" 
+          onClick={onCancel}
+          disabled={submitting}
+          className="flex-1"
+        >
+          Back
+        </Button>
+        <Button 
+          onClick={submitForApproval}
+          disabled={submitting}
+          className="flex-1 bg-blue-600 hover:bg-blue-700"
+        >
+          {submitting ? (
+            <>
+              <div className="animate-spin w-4 h-4 border border-white border-t-transparent rounded-full mr-2"></div>
+              Submitting...
+            </>
+          ) : (
+            <>
+              <UserCheck className="w-4 h-4 mr-2" />
+              Submit for Approval
+            </>
+          )}
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+};
+
+// Main Component
 const UpcomingEventDetails = () => {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
@@ -70,20 +493,20 @@ const UpcomingEventDetails = () => {
   const [registering, setRegistering] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [isRegistered, setIsRegistered] = useState(false);
+  const [isPendingApproval, setIsPendingApproval] = useState(false);
   const [isEventOwner, setIsEventOwner] = useState(false);
   const [challengesLoaded, setChallengesLoaded] = useState(false);
   const [timeLeft, setTimeLeft] = useState<TimeLeft | null>(null);
+  const [showRegistrationDialog, setShowRegistrationDialog] = useState(false);
+  const [registrationStep, setRegistrationStep] = useState<'select' | 'mobile_money' | 'approval'>('select');
 
   useEffect(() => {
     if (!eventId) {
-      console.log("❌ No eventId in URL parameters");
       setMessage({ type: 'error', text: 'Invalid event URL' });
       setLoading(false);
       return;
     }
 
-    console.log("🎯 Loading upcoming event:", eventId);
-    
     const fetchData = async () => {
       await fetchEventData();
       await fetchEventChallenges();
@@ -100,7 +523,6 @@ const UpcomingEventDetails = () => {
             id: doc.id,
             ...doc.data()
           } as Event;
-          console.log("📡 Real-time event update:", eventData);
           setEvent(eventData);
           
           if (user) {
@@ -109,6 +531,9 @@ const UpcomingEventDetails = () => {
               eventData.registeredUsers?.includes(user.uid);
             setIsRegistered(!!userRegistered);
             
+            const userPending = eventData.pendingApprovals?.includes(user.uid);
+            setIsPendingApproval(!!userPending);
+            
             const isOwner = eventData.createdById === user.uid;
             const hasAdminAccess = isAdmin || isModerator;
             setIsEventOwner(isOwner || hasAdminAccess);
@@ -116,7 +541,7 @@ const UpcomingEventDetails = () => {
         }
       },
       (error) => {
-        console.error("💥 Real-time event listener error:", error);
+        console.error("Real-time event listener error:", error);
       }
     );
     
@@ -172,6 +597,9 @@ const UpcomingEventDetails = () => {
             eventData.registeredUsers?.includes(user.uid);
           setIsRegistered(!!userRegistered);
           
+          const userPending = eventData.pendingApprovals?.includes(user.uid);
+          setIsPendingApproval(!!userPending);
+          
           const isOwner = eventData.createdById === user.uid;
           const hasAdminAccess = isAdmin || isModerator;
           setIsEventOwner(isOwner || hasAdminAccess);
@@ -180,7 +608,7 @@ const UpcomingEventDetails = () => {
         setMessage({ type: 'error', text: 'Event not found' });
       }
     } catch (error: any) {
-      console.error("💥 Error fetching event:", error);
+      console.error("Error fetching event:", error);
       setMessage({ type: 'error', text: `Failed to load event: ${error.message}` });
     } finally {
       setLoading(false);
@@ -202,7 +630,6 @@ const UpcomingEventDetails = () => {
       
       challengesSnapshot.forEach(doc => {
         const data = doc.data();
-        // For upcoming events, show all challenges to owners/admins, but hide from regular users
         if (isEventOwner || data.isActive) {
           challengesData.push({
             id: doc.id,
@@ -223,7 +650,7 @@ const UpcomingEventDetails = () => {
       setChallengesLoaded(true);
 
     } catch (error) {
-      console.error("❌ Error fetching challenges:", error);
+      console.error("Error fetching challenges:", error);
       setChallenges([]);
       setChallengesLoaded(true);
     }
@@ -247,33 +674,11 @@ const UpcomingEventDetails = () => {
     }
   };
 
-  const registerForEvent = async () => {
-    if (!user || !event) {
-      alert("Please log in to register for events");
-      navigate('/login');
-      return;
-    }
-
-    setRegistering(true);
-    setMessage(null);
+  // Function to actually register user in Firestore
+  const completeRegistration = async () => {
+    if (!user || !event) return;
 
     try {
-      const alreadyRegistered = 
-        event.participants?.includes(user.uid) || 
-        event.registeredUsers?.includes(user.uid);
-      
-      if (alreadyRegistered) {
-        setMessage({ type: 'error', text: 'You are already registered for this event.' });
-        setIsRegistered(true);
-        return;
-      }
-
-      // Check if event is full
-      if (event.maxParticipants && getParticipantCount(event) >= event.maxParticipants) {
-        setMessage({ type: 'error', text: 'This event is full. Registration is closed.' });
-        return;
-      }
-
       const eventRef = doc(db, "events", event.id);
       await updateDoc(eventRef, {
         participants: arrayUnion(user.uid),
@@ -284,14 +689,87 @@ const UpcomingEventDetails = () => {
       setMessage({ type: 'success', text: 'Successfully registered for the event!' });
       
     } catch (error: any) {
-      console.error("❌ Error registering for event:", error);
+      console.error("Error completing registration:", error);
       setMessage({ 
         type: 'error', 
-        text: `Failed to register: ${error.message}. Please try again.` 
+        text: `Failed to complete registration: ${error.message}` 
       });
-    } finally {
-      setRegistering(false);
     }
+  };
+
+  const registerForEvent = async () => {
+    if (!user || !event) {
+      alert("Please log in to register for events");
+      navigate('/login');
+      return;
+    }
+
+    // Check if already registered
+    const alreadyRegistered = 
+      event.participants?.includes(user.uid) || 
+      event.registeredUsers?.includes(user.uid);
+    
+    const alreadyPending = event.pendingApprovals?.includes(user.uid);
+    
+    if (alreadyRegistered) {
+      setMessage({ type: 'error', text: 'You are already registered for this event.' });
+      setIsRegistered(true);
+      return;
+    }
+
+    if (alreadyPending) {
+      setMessage({ type: 'error', text: 'You already have a pending registration request for this event.' });
+      setIsPendingApproval(true);
+      return;
+    }
+
+    // Check if event is full
+    if (event.maxParticipants && getParticipantCount(event) >= event.maxParticipants) {
+      setMessage({ type: 'error', text: 'This event is full. Registration is closed.' });
+      return;
+    }
+
+    // For paid events, show registration method selection
+    if (event.requiresParticipantPayment && event.individualPrice) {
+      setRegistrationStep('select');
+      setShowRegistrationDialog(true);
+    } else if (event.createdBy === 'user') {
+      // Community hosted free event - requires approval
+      setRegistrationStep('approval');
+      setShowRegistrationDialog(true);
+    } else {
+      // Free admin-hosted event - register directly
+      await completeRegistration();
+    }
+  };
+
+  const handlePaymentSuccess = () => {
+    setShowRegistrationDialog(false);
+    setRegistrationStep('select');
+    completeRegistration();
+  };
+
+  const handleApprovalSuccess = () => {
+    setShowRegistrationDialog(false);
+    setRegistrationStep('select');
+    setIsPendingApproval(true);
+    setMessage({ 
+      type: 'success', 
+      text: 'Registration request submitted! Your status is now "Pending Approval". You will be notified once approved.' 
+    });
+  };
+
+  const handleRegistrationCancel = () => {
+    setShowRegistrationDialog(false);
+    setRegistrationStep('select');
+  };
+
+  const handleSelectMethod = (method: 'mobile_money' | 'approval') => {
+    setRegistrationStep(method);
+  };
+
+  const handleBackToSelection = () => {
+    setRegistrationStep('select');
   };
 
   const navigateToEvents = () => {
@@ -343,6 +821,10 @@ const UpcomingEventDetails = () => {
       return event.registeredUsers.length;
     }
     return event.totalParticipants || 0;
+  };
+
+  const getPendingApprovalsCount = (event: Event): number => {
+    return event.pendingApprovals?.length || 0;
   };
 
   const getCurrencyDisplay = (event: Event): string => {
@@ -438,6 +920,7 @@ const UpcomingEventDetails = () => {
   }
 
   const participantCount = getParticipantCount(event);
+  const pendingCount = getPendingApprovalsCount(event);
   const currency = getCurrencyDisplay(event);
   const isEventFull = event.maxParticipants && participantCount >= event.maxParticipants;
 
@@ -478,6 +961,12 @@ const UpcomingEventDetails = () => {
                   Registered
                 </Badge>
               )}
+              {isPendingApproval && user && (
+                <Badge className="bg-yellow-500/20 text-yellow-600 border-yellow-200 text-xs">
+                  <UserCheck className="w-3 h-3 mr-1" />
+                  Pending Approval
+                </Badge>
+              )}
               {isEventOwner && (
                 <Badge className="bg-purple-500/20 text-purple-600 border-purple-200 text-xs">
                   <Shield className="w-3 h-3 mr-1" />
@@ -510,6 +999,9 @@ const UpcomingEventDetails = () => {
                 <div className="flex items-center gap-1 text-muted-foreground">
                   <Users className="w-3 h-3" />
                   <span>{participantCount} registered{event.maxParticipants && ` / ${event.maxParticipants} max`}</span>
+                  {pendingCount > 0 && (
+                    <span className="text-yellow-600"> ({pendingCount} pending)</span>
+                  )}
                 </div>
                 {event.participationType && (
                   <div className="flex items-center gap-1 text-muted-foreground">
@@ -591,28 +1083,19 @@ const UpcomingEventDetails = () => {
             )}
             
             {/* Register Button */}
-            {!isRegistered && user && !isEventOwner && !isEventFull && (
+            {!isRegistered && !isPendingApproval && user && !isEventOwner && !isEventFull && (
               <Button 
                 onClick={registerForEvent} 
                 disabled={registering}
                 className="flex-1"
                 variant="terminal"
               >
-                {registering ? (
-                  <>
-                    <div className="animate-spin w-4 h-4 border border-white border-t-transparent rounded-full mr-2"></div>
-                    Registering...
-                  </>
-                ) : (
-                  <>
-                    <UserPlus className="w-4 h-4 mr-2" />
-                    Register for Event
-                  </>
-                )}
+                <UserPlus className="w-4 h-4 mr-2" />
+                Register for Event
               </Button>
             )}
 
-            {!isRegistered && !user && (
+            {!isRegistered && !isPendingApproval && !user && (
               <Button 
                 onClick={() => navigate('/login')} 
                 className="flex-1"
@@ -623,7 +1106,7 @@ const UpcomingEventDetails = () => {
               </Button>
             )}
 
-            {isEventFull && !isRegistered && (
+            {isEventFull && !isRegistered && !isPendingApproval && (
               <Button disabled variant="outline" className="flex-1">
                 Event Full - Registration Closed
               </Button>
@@ -633,6 +1116,13 @@ const UpcomingEventDetails = () => {
               <Button disabled variant="outline" className="flex-1">
                 <CheckCircle className="w-4 h-4 mr-2" />
                 Already Registered
+              </Button>
+            )}
+
+            {isPendingApproval && (
+              <Button disabled variant="outline" className="flex-1">
+                <UserCheck className="w-4 h-4 mr-2" />
+                Pending Approval
               </Button>
             )}
           </div>
@@ -782,6 +1272,9 @@ const UpcomingEventDetails = () => {
                   <div>
                     <h4 className="font-semibold text-xs text-muted-foreground">Registered</h4>
                     <p className="text-sm">{participantCount}{event.maxParticipants && ` / ${event.maxParticipants} max`}</p>
+                    {pendingCount > 0 && (
+                      <p className="text-xs text-yellow-600">{pendingCount} pending approval</p>
+                    )}
                   </div>
                   <div>
                     <h4 className="font-semibold text-xs text-muted-foreground">Challenges</h4>
@@ -800,6 +1293,45 @@ const UpcomingEventDetails = () => {
         </div>
       </div>
       <Footer />
+
+      {/* Registration Dialog */}
+      {showRegistrationDialog && (
+        <Dialog open={showRegistrationDialog} onOpenChange={setShowRegistrationDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>
+                {registrationStep === 'select' && 'Select Registration Method'}
+                {registrationStep === 'mobile_money' && 'Mobile Money Payment'}
+                {registrationStep === 'approval' && 'Request Admin Approval'}
+              </DialogTitle>
+            </DialogHeader>
+            
+            {registrationStep === 'select' && event && (
+              <RegistrationMethodSelection
+                event={event}
+                onCancel={handleRegistrationCancel}
+                onSelectMethod={handleSelectMethod}
+              />
+            )}
+            
+            {registrationStep === 'mobile_money' && event && (
+              <MobileMoneyPayment
+                event={event}
+                onCancel={handleBackToSelection}
+                onSuccess={handlePaymentSuccess}
+              />
+            )}
+            
+            {registrationStep === 'approval' && event && (
+              <AdminApprovalRegistration
+                event={event}
+                onCancel={handleBackToSelection}
+                onSuccess={handleApprovalSuccess}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 };

@@ -27,7 +27,10 @@ import {
   XCircle,
   UserPlus,
   UserMinus,
-  Settings
+  Settings,
+  RefreshCw,
+  Download,
+  Mail
 } from "lucide-react";
 import { 
   Select,
@@ -55,6 +58,7 @@ import {
 import EditEvent from "./EditEvent";
 import AddChallenges from "./AddChallenges";
 import ModeratorAssignment from "./ModeratorAssignment";
+import EventParticipants from "./EventParticipants";
 
 interface Event {
   id: string;
@@ -81,6 +85,7 @@ interface Event {
   individualPrice?: number;
   currency?: string;
   assignedModerators?: string[]; // Array of moderator UIDs
+  pendingApprovals?: string[]; // Array of user IDs waiting for approval
 }
 
 interface User {
@@ -110,6 +115,7 @@ const EventManagement = ({ onBack, onAddChallenges }: EventManagementProps) => {
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
   const [addingChallengesToEvent, setAddingChallengesToEvent] = useState<Event | null>(null);
   const [managingModeratorsForEvent, setManagingModeratorsForEvent] = useState<Event | null>(null);
+  const [managingParticipantsForEvent, setManagingParticipantsForEvent] = useState<Event | null>(null);
 
   useEffect(() => {
     fetchEvents();
@@ -341,6 +347,15 @@ const EventManagement = ({ onBack, onAddChallenges }: EventManagementProps) => {
     setManagingModeratorsForEvent(event);
   };
 
+  // Handle manage participants
+  const handleManageParticipants = (event: Event) => {
+    if (!canManageEvent(event)) {
+      setMessage({ type: 'error', text: 'You do not have permission to manage participants for this event' });
+      return;
+    }
+    setManagingParticipantsForEvent(event);
+  };
+
   // Handle save event
   const handleSaveEvent = (eventId: string, updatedEvent: Partial<Event>) => {
     setEditingEvent(null);
@@ -358,6 +373,13 @@ const EventManagement = ({ onBack, onAddChallenges }: EventManagementProps) => {
     setManagingModeratorsForEvent(null);
     fetchEvents();
     setMessage({ type: 'success', text: 'Moderators updated successfully' });
+  };
+
+  // Handle participants updated
+  const handleParticipantsUpdated = () => {
+    setManagingParticipantsForEvent(null);
+    fetchEvents();
+    setMessage({ type: 'success', text: 'Participants updated successfully' });
   };
 
   // Handle navigation to create new challenge
@@ -391,6 +413,11 @@ const EventManagement = ({ onBack, onAddChallenges }: EventManagementProps) => {
       return event.registeredUsers.length;
     }
     return event.totalParticipants || 0;
+  };
+
+  // Get pending approvals count
+  const getPendingApprovalsCount = (event: Event): number => {
+    return event.pendingApprovals?.length || 0;
   };
 
   // Get event ownership/assignment badge
@@ -427,6 +454,22 @@ const EventManagement = ({ onBack, onAddChallenges }: EventManagementProps) => {
     return null;
   };
 
+  // Get participants badge with pending count
+  const getParticipantsBadge = (event: Event) => {
+    const participantCount = getParticipantCount(event);
+    const pendingCount = getPendingApprovalsCount(event);
+    
+    return (
+      <Badge variant="secondary" className="text-xs">
+        <Users className="w-3 h-3 mr-1" />
+        {participantCount} participants
+        {pendingCount > 0 && (
+          <span className="ml-1 text-yellow-600">({pendingCount} pending)</span>
+        )}
+      </Badge>
+    );
+  };
+
   // Render EditEvent component if editing
   if (editingEvent) {
     return (
@@ -459,6 +502,17 @@ const EventManagement = ({ onBack, onAddChallenges }: EventManagementProps) => {
         allModerators={allModerators}
         onBack={() => setManagingModeratorsForEvent(null)}
         onModeratorsUpdated={handleModeratorsUpdated}
+      />
+    );
+  }
+
+  // Render EventParticipants component if managing participants
+  if (managingParticipantsForEvent) {
+    return (
+      <EventParticipants
+        event={managingParticipantsForEvent}
+        onBack={() => setManagingParticipantsForEvent(null)}
+        onParticipantsUpdated={handleParticipantsUpdated}
       />
     );
   }
@@ -564,6 +618,7 @@ const EventManagement = ({ onBack, onAddChallenges }: EventManagementProps) => {
           {filteredEvents.map((event) => {
             const eventStatus = getEventStatus(event.startDate, event.endDate);
             const participantCount = getParticipantCount(event);
+            const pendingCount = getPendingApprovalsCount(event);
             const canManage = canManageEvent(event);
             const canDelete = canDeleteEvent(event);
             const canAssign = canAssignModerators(event);
@@ -586,6 +641,7 @@ const EventManagement = ({ onBack, onAddChallenges }: EventManagementProps) => {
                             </Badge>
                             {getEventAccessBadge(event)}
                             {getModeratorsBadge(event)}
+                            {getParticipantsBadge(event)}
                             {event.createdBy === 'user' && (
                               <Badge variant="outline" className="text-xs bg-orange-50 border-orange-200">
                                 <Crown className="w-3 h-3 mr-1" />
@@ -630,6 +686,9 @@ const EventManagement = ({ onBack, onAddChallenges }: EventManagementProps) => {
                         <div className="flex items-center gap-1">
                           <Users className="w-4 h-4" />
                           <span>{participantCount} participants</span>
+                          {pendingCount > 0 && (
+                            <span className="text-yellow-600"> ({pendingCount} pending)</span>
+                          )}
                           {event.maxParticipants && (
                             <span> / {event.maxParticipants} max</span>
                           )}
@@ -662,60 +721,82 @@ const EventManagement = ({ onBack, onAddChallenges }: EventManagementProps) => {
                       {canManage && (
                         <>
                           <TooltipProvider>
-                            <div className="flex gap-2">
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleEditEvent(event)}
-                                    className="gap-2 flex-1"
-                                  >
-                                    <Edit className="w-4 h-4" />
-                                    Edit
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p>Edit event details</p>
-                                </TooltipContent>
-                              </Tooltip>
+                            <div className="flex flex-col sm:flex-row lg:flex-col gap-2">
+                              <div className="flex gap-2">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleEditEvent(event)}
+                                      className="gap-2 flex-1"
+                                    >
+                                      <Edit className="w-4 h-4" />
+                                      Edit
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Edit event details</p>
+                                  </TooltipContent>
+                                </Tooltip>
 
-                              {eventStatus === "UPCOMING" && (
+                                {/* Participants Management Button */}
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <Button
                                       size="sm"
                                       variant="outline"
-                                      onClick={() => handleAddChallenges(event)}
+                                      onClick={() => handleManageParticipants(event)}
                                       className="gap-2 flex-1"
                                     >
-                                      <Plus className="w-4 h-4" />
-                                      Challenges
+                                      <Users className="w-4 h-4" />
+                                      Participants
                                     </Button>
                                   </TooltipTrigger>
                                   <TooltipContent>
-                                    <p>Manage event challenges</p>
+                                    <p>Manage event participants and approvals</p>
                                   </TooltipContent>
                                 </Tooltip>
-                              )}
+                              </div>
 
-                              {canAssign && (
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => handleManageModerators(event)}
-                                      className="gap-2 flex-1"
-                                    >
-                                      <UserPlus className="w-4 h-4" />
-                                      Moderators
-                                    </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    <p>Assign moderators to this event</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              )}
+                              <div className="flex gap-2">
+                                {eventStatus === "UPCOMING" && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => handleAddChallenges(event)}
+                                        className="gap-2 flex-1"
+                                      >
+                                        <Plus className="w-4 h-4" />
+                                        Challenges
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>Manage event challenges</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
+
+                                {canAssign && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => handleManageModerators(event)}
+                                        className="gap-2 flex-1"
+                                      >
+                                        <UserPlus className="w-4 h-4" />
+                                        Moderators
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>Assign moderators to this event</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
+                              </div>
                             </div>
                           </TooltipProvider>
                         </>
