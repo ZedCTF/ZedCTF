@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { X, Camera, User, BookOpen, GraduationCap, Award, Users, CheckCircle } from "lucide-react";
-import { updateProfile } from "firebase/auth";
-import { doc, updateDoc } from "firebase/firestore";
+import { X, Camera, User, BookOpen, GraduationCap, Award, Users, CheckCircle, Key, Mail } from "lucide-react";
+import { updateProfile, updatePassword, sendPasswordResetEmail } from "firebase/auth";
+import { doc, updateDoc, getDoc } from "firebase/firestore";
 import { auth, db, storage } from "../firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuthContext } from "../contexts/AuthContext";
@@ -18,6 +18,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [activeTab, setActiveTab] = useState<'profile' | 'security'>('profile');
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [formData, setFormData] = useState({
@@ -27,8 +28,15 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     institution: ''
   });
 
+  const [securityData, setSecurityData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+
   const [profileImage, setProfileImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState('');
+  const [securityMessage, setSecurityMessage] = useState({ type: '', text: '' });
 
   // Load user data when modal opens
   useEffect(() => {
@@ -63,7 +71,22 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     }
   }, [isOpen, user]);
 
-  // Handle form input changes
+  // Reset form when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setActiveTab('profile');
+      setSecurityData({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: ''
+      });
+      setSecurityMessage({ type: '', text: '' });
+      setProfileImage(null);
+      setPreviewUrl(user?.photoURL || '');
+    }
+  }, [isOpen, user]);
+
+  // Handle profile form input changes
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -72,7 +95,20 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     }));
   };
 
-  // Handle profile image selection with compression
+  // Handle security form input changes
+  const handleSecurityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setSecurityData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    // Clear messages when user starts typing
+    if (securityMessage.text) {
+      setSecurityMessage({ type: '', text: '' });
+    }
+  };
+
+  // Handle profile image selection
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -82,9 +118,9 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
         return;
       }
       
-      // Check file size (max 2MB for faster uploads)
-      if (file.size > 2 * 1024 * 1024) {
-        alert('Image size should be less than 2MB for faster upload');
+      // Check file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Image size should be less than 5MB');
         return;
       }
 
@@ -141,7 +177,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     });
   };
 
-  // Upload image to Firebase Storage with progress tracking
+  // Upload image to Firebase Storage
   const uploadImage = async (file: File, userId: string): Promise<string> => {
     // Compress image first
     const compressedFile = await compressImage(file);
@@ -156,8 +192,8 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     return downloadURL;
   };
 
-  // Handle form submission
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Handle profile form submission
+  const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
 
@@ -167,7 +203,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     try {
       let photoURL = user.photoURL;
 
-      // Upload new profile image if selected (in background)
+      // Upload new profile image if selected
       if (profileImage) {
         setUploading(true);
         try {
@@ -175,13 +211,16 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
           console.log("Profile image uploaded successfully");
         } catch (error) {
           console.error("Error uploading image:", error);
-          // Continue without the image if upload fails
+          alert("Failed to upload image. Please try again.");
+          setLoading(false);
+          setUploading(false);
+          return;
         } finally {
           setUploading(false);
         }
       }
 
-      // Update profile data immediately (don't wait for image if it's slow)
+      // Update profile data
       const updatePromises = [];
 
       // Update Firebase Auth profile
@@ -217,11 +256,91 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
         onClose();
         // Refresh the page to show updated profile
         window.location.reload();
-      }, 1000);
+      }, 1500);
 
     } catch (error) {
       console.error("Error updating profile:", error);
       alert("Failed to update profile. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle password change
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !user.email) return;
+
+    setLoading(true);
+    setSecurityMessage({ type: '', text: '' });
+
+    try {
+      // Validate passwords
+      if (securityData.newPassword !== securityData.confirmPassword) {
+        setSecurityMessage({ type: 'error', text: 'New passwords do not match' });
+        setLoading(false);
+        return;
+      }
+
+      if (securityData.newPassword.length < 6) {
+        setSecurityMessage({ type: 'error', text: 'Password must be at least 6 characters long' });
+        setLoading(false);
+        return;
+      }
+
+      // Update password
+      await updatePassword(user, securityData.newPassword);
+      
+      setSecurityMessage({ 
+        type: 'success', 
+        text: 'Password updated successfully!' 
+      });
+      
+      // Reset form
+      setSecurityData({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: ''
+      });
+
+    } catch (error: any) {
+      console.error("Error changing password:", error);
+      
+      if (error.code === 'auth/requires-recent-login') {
+        setSecurityMessage({ 
+          type: 'error', 
+          text: 'For security, please re-authenticate by signing out and back in before changing your password.' 
+        });
+      } else {
+        setSecurityMessage({ 
+          type: 'error', 
+          text: error.message || 'Failed to change password. Please try again.' 
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle password reset email
+  const handlePasswordReset = async () => {
+    if (!user?.email) return;
+
+    setLoading(true);
+    setSecurityMessage({ type: '', text: '' });
+
+    try {
+      await sendPasswordResetEmail(auth, user.email);
+      setSecurityMessage({ 
+        type: 'success', 
+        text: `Password reset email sent to ${user.email}. Please check your inbox.` 
+      });
+    } catch (error: any) {
+      console.error("Error sending reset email:", error);
+      setSecurityMessage({ 
+        type: 'error', 
+        text: error.message || 'Failed to send reset email. Please try again.' 
+      });
     } finally {
       setLoading(false);
     }
@@ -239,7 +358,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
       <div className="bg-background rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-border">
-          <h2 className="text-xl font-semibold text-foreground">Edit Profile</h2>
+          <h2 className="text-xl font-semibold text-foreground">Account Settings</h2>
           <button
             onClick={onClose}
             className="text-muted-foreground hover:text-foreground transition-colors"
@@ -249,175 +368,311 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
           </button>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Success Message */}
-          {saveSuccess && (
-            <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded flex items-center gap-2">
-              <CheckCircle className="w-5 h-5" />
-              Profile updated successfully!
-            </div>
-          )}
-
-          {/* Profile Picture */}
-          <div className="flex flex-col items-center space-y-4">
-            <div className="relative">
-              <div className="w-24 h-24 rounded-full bg-muted/50 border-2 border-border flex items-center justify-center overflow-hidden">
-                {previewUrl ? (
-                  <img 
-                    src={previewUrl} 
-                    alt="Profile" 
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <User className="w-12 h-12 text-muted-foreground" />
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={triggerFileInput}
-                disabled={uploading || loading}
-                className="absolute bottom-0 right-0 bg-primary text-primary-foreground rounded-full p-2 hover:bg-primary/90 transition-colors disabled:opacity-50"
-              >
-                {uploading ? (
-                  <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
-                ) : (
-                  <Camera className="w-4 h-4" />
-                )}
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleImageSelect}
-                className="hidden"
-                disabled={uploading || loading}
-              />
-            </div>
-            <p className="text-sm text-muted-foreground text-center">
-              {uploading ? 'Uploading image...' : 'Click the camera icon to upload a profile picture (max 2MB)'}
-            </p>
-          </div>
-
-          {/* Display Name */}
-          <div>
-            <label htmlFor="displayName" className="block text-sm font-medium text-foreground mb-2">
-              Display Name
-            </label>
-            <input
-              id="displayName"
-              name="displayName"
-              type="text"
-              value={formData.displayName}
-              onChange={handleChange}
-              className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-              placeholder="Enter your display name"
-              disabled={loading}
-            />
-          </div>
-
-          {/* Bio */}
-          <div>
-            <label htmlFor="bio" className="block text-sm font-medium text-foreground mb-2">
-              Bio
-            </label>
-            <textarea
-              id="bio"
-              name="bio"
-              rows={3}
-              value={formData.bio}
-              onChange={handleChange}
-              className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all resize-none"
-              placeholder="Tell us about yourself..."
-              disabled={loading}
-            />
-          </div>
-
-          {/* Role */}
-          <div>
-            <label htmlFor="role" className="block text-sm font-medium text-foreground mb-2">
-              I am a
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { value: 'student', label: 'Student', icon: GraduationCap },
-                { value: 'lecturer', label: 'Lecturer', icon: Users },
-                { value: 'expert', label: 'Expert', icon: Award },
-                { value: 'general', label: 'General User', icon: User }
-              ].map(({ value, label, icon: Icon }) => (
-                <label
-                  key={value}
-                  className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-all ${
-                    formData.role === value
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border hover:border-primary/50 text-foreground'
-                  } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <input
-                    type="radio"
-                    name="role"
-                    value={value}
-                    checked={formData.role === value}
-                    onChange={handleChange}
-                    className="hidden"
-                    disabled={loading}
-                  />
-                  <Icon className="w-4 h-4" />
-                  <span className="text-sm font-medium">{label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Institution */}
-          <div>
-            <label htmlFor="institution" className="block text-sm font-medium text-foreground mb-2">
-              Institution
-            </label>
-            <input
-              id="institution"
-              name="institution"
-              type="text"
-              value={formData.institution}
-              onChange={handleChange}
-              className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-              placeholder="Your school, university, or organization"
-              disabled={loading}
-            />
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-3 pt-4">
+        {/* Tabs */}
+        <div className="border-b border-border">
+          <div className="flex p-2">
             <button
               type="button"
-              onClick={onClose}
-              disabled={loading}
-              className="flex-1 px-4 py-2 border border-border text-foreground rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
+              onClick={() => setActiveTab('profile')}
+              className={`flex-1 py-2 px-3 text-sm font-medium rounded-md transition-colors ${
+                activeTab === 'profile'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
             >
-              Cancel
+              <User className="w-4 h-4 inline mr-2" />
+              Profile
             </button>
             <button
-              type="submit"
-              disabled={loading || uploading}
-              className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              type="button"
+              onClick={() => setActiveTab('security')}
+              className={`flex-1 py-2 px-3 text-sm font-medium rounded-md transition-colors ${
+                activeTab === 'security'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
             >
-              {loading ? (
-                <>
-                  <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
-                  Saving...
-                </>
-              ) : (
-                'Save Changes'
-              )}
+              <Key className="w-4 h-4 inline mr-2" />
+              Security
             </button>
           </div>
-        </form>
+        </div>
+
+        {/* Profile Tab */}
+        {activeTab === 'profile' && (
+          <form onSubmit={handleProfileSubmit} className="p-6 space-y-6">
+            {/* Success Message */}
+            {saveSuccess && (
+              <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded flex items-center gap-2">
+                <CheckCircle className="w-5 h-5" />
+                Profile updated successfully!
+              </div>
+            )}
+
+            {/* Profile Picture */}
+            <div className="flex flex-col items-center space-y-4">
+              <div className="relative">
+                <div className="w-24 h-24 rounded-full bg-muted/50 border-2 border-border flex items-center justify-center overflow-hidden">
+                  {previewUrl ? (
+                    <img 
+                      src={previewUrl} 
+                      alt="Profile" 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <User className="w-12 h-12 text-muted-foreground" />
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={triggerFileInput}
+                  disabled={uploading || loading}
+                  className="absolute bottom-0 right-0 bg-primary text-primary-foreground rounded-full p-2 hover:bg-primary/90 transition-colors disabled:opacity-50"
+                >
+                  {uploading ? (
+                    <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
+                  ) : (
+                    <Camera className="w-4 h-4" />
+                  )}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageSelect}
+                  className="hidden"
+                  disabled={uploading || loading}
+                />
+              </div>
+              <p className="text-sm text-muted-foreground text-center">
+                {uploading ? 'Uploading image...' : 'Click the camera icon to upload a profile picture (max 5MB)'}
+              </p>
+            </div>
+
+            {/* Display Name */}
+            <div>
+              <label htmlFor="displayName" className="block text-sm font-medium text-foreground mb-2">
+                Display Name
+              </label>
+              <input
+                id="displayName"
+                name="displayName"
+                type="text"
+                value={formData.displayName}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                placeholder="Enter your display name"
+                disabled={loading}
+              />
+            </div>
+
+            {/* Bio */}
+            <div>
+              <label htmlFor="bio" className="block text-sm font-medium text-foreground mb-2">
+                Bio
+              </label>
+              <textarea
+                id="bio"
+                name="bio"
+                rows={3}
+                value={formData.bio}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all resize-none"
+                placeholder="Tell us about yourself..."
+                disabled={loading}
+              />
+            </div>
+
+            {/* Role */}
+            <div>
+              <label htmlFor="role" className="block text-sm font-medium text-foreground mb-2">
+                I am a
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { value: 'student', label: 'Student', icon: GraduationCap },
+                  { value: 'lecturer', label: 'Lecturer', icon: Users },
+                  { value: 'expert', label: 'Expert', icon: Award },
+                  { value: 'general', label: 'General User', icon: User }
+                ].map(({ value, label, icon: Icon }) => (
+                  <label
+                    key={value}
+                    className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-all ${
+                      formData.role === value
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border hover:border-primary/50 text-foreground'
+                    } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      name="role"
+                      value={value}
+                      checked={formData.role === value}
+                      onChange={handleChange}
+                      className="hidden"
+                      disabled={loading}
+                    />
+                    <Icon className="w-4 h-4" />
+                    <span className="text-sm font-medium">{label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Institution */}
+            <div>
+              <label htmlFor="institution" className="block text-sm font-medium text-foreground mb-2">
+                Institution
+              </label>
+              <input
+                id="institution"
+                name="institution"
+                type="text"
+                value={formData.institution}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                placeholder="Your school, university, or organization"
+                disabled={loading}
+              />
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-3 pt-4">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={loading}
+                className="flex-1 px-4 py-2 border border-border text-foreground rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading || uploading}
+                className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
+                )}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Security Tab */}
+        {activeTab === 'security' && (
+          <div className="p-6 space-y-6">
+            {/* Security Message */}
+            {securityMessage.text && (
+              <div className={`px-4 py-3 rounded flex items-center gap-2 ${
+                securityMessage.type === 'success' 
+                  ? 'bg-green-100 border border-green-400 text-green-700'
+                  : 'bg-red-100 border border-red-400 text-red-700'
+              }`}>
+                {securityMessage.type === 'success' ? (
+                  <CheckCircle className="w-5 h-5" />
+                ) : (
+                  <X className="w-5 h-5" />
+                )}
+                {securityMessage.text}
+              </div>
+            )}
+
+            {/* Change Password Form */}
+            <form onSubmit={handlePasswordChange} className="space-y-4">
+              <h3 className="text-lg font-medium text-foreground">Change Password</h3>
+              
+              <div>
+                <label htmlFor="newPassword" className="block text-sm font-medium text-foreground mb-2">
+                  New Password
+                </label>
+                <input
+                  id="newPassword"
+                  name="newPassword"
+                  type="password"
+                  value={securityData.newPassword}
+                  onChange={handleSecurityChange}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                  placeholder="Enter new password"
+                  disabled={loading}
+                  minLength={6}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="confirmPassword" className="block text-sm font-medium text-foreground mb-2">
+                  Confirm New Password
+                </label>
+                <input
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  type="password"
+                  value={securityData.confirmPassword}
+                  onChange={handleSecurityChange}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                  placeholder="Confirm new password"
+                  disabled={loading}
+                  minLength={6}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading || !securityData.newPassword || !securityData.confirmPassword}
+                className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
+                    Updating...
+                  </>
+                ) : (
+                  <>
+                    <Key className="w-4 h-4" />
+                    Change Password
+                  </>
+                )}
+              </button>
+            </form>
+
+            {/* Password Reset Section */}
+            <div className="pt-4 border-t border-border">
+              <h3 className="text-lg font-medium text-foreground mb-3">Reset Password</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Can't remember your current password? We'll send a reset link to your email.
+              </p>
+              <button
+                type="button"
+                onClick={handlePasswordReset}
+                disabled={loading}
+                className="w-full px-4 py-2 border border-border text-foreground rounded-lg hover:bg-muted transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                <Mail className="w-4 h-4" />
+                Send Reset Email
+              </button>
+            </div>
+
+            {/* Close Button */}
+            <div className="pt-4">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={loading}
+                className="w-full px-4 py-2 border border-border text-foreground rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 };
-
-// Add the missing import
-import { getDoc } from "firebase/firestore";
 
 export default ProfileModal;
