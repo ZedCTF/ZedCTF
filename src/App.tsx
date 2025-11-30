@@ -58,26 +58,27 @@ function App() {
                       </ProtectedRoute>
                     } 
                   />
+                  
+                  {/* Practice Routes - Accessible to ALL authenticated users (including admins) */}
                   <Route 
                     path="/practice" 
                     element={
                       <ProtectedRoute>
-                        <UserOnlyRoute>
-                          <Practice />
-                        </UserOnlyRoute>
+                        <Practice />
                       </ProtectedRoute>
                     } 
                   />
+                  
+                  {/* LIVE CTF Routes - Accessible to ALL authenticated users (including admins) */}
                   <Route 
                     path="/live" 
                     element={
                       <ProtectedRoute>
-                        <UserOnlyRoute>
-                          <LiveEvents />
-                        </UserOnlyRoute>
+                        <LiveEvents />
                       </ProtectedRoute>
                     } 
                   />
+                  
                   <Route 
                     path="/writeups/create" 
                     element={
@@ -89,38 +90,32 @@ function App() {
                     } 
                   />
                   
-                  {/* Practice Challenge Detail Route - User only */}
+                  {/* Practice Challenge Detail Route - Accessible to ALL authenticated users (including admins) */}
                   <Route 
                     path="/practice/challenge/:challengeId" 
                     element={
                       <ProtectedRoute>
-                        <UserOnlyRoute>
-                          <PracticeChallengeDetail />
-                        </UserOnlyRoute>
+                        <PracticeChallengeDetail />
                       </ProtectedRoute>
                     } 
                   />
                   
-                  {/* Live Event Challenge Detail Route - User only */}
+                  {/* Live Event Challenge Detail Route - Accessible to ALL authenticated users (including admins) */}
                   <Route 
                     path="/live-event/:eventId/challenge/:challengeId" 
                     element={
                       <ProtectedRoute>
-                        <UserOnlyRoute>
-                          <LiveEventChallengeDetail />
-                        </UserOnlyRoute>
+                        <LiveEventChallengeDetail />
                       </ProtectedRoute>
                     } 
                   />
                   
-                  {/* Event Details Routes - User only */}
+                  {/* Event Details Routes - Accessible to ALL authenticated users (including admins) */}
                   <Route 
                     path="/event/upcoming/:eventId" 
                     element={
                       <ProtectedRoute>
-                        <UserOnlyRoute>
-                          <UpcomingEventDetails />
-                        </UserOnlyRoute>
+                        <UpcomingEventDetails />
                       </ProtectedRoute>
                     } 
                   />
@@ -128,9 +123,7 @@ function App() {
                     path="/event/live/:eventId" 
                     element={
                       <ProtectedRoute>
-                        <UserOnlyRoute>
-                          <LiveEventDetails />
-                        </UserOnlyRoute>
+                        <LiveEventDetails />
                       </ProtectedRoute>
                     } 
                   />
@@ -138,9 +131,7 @@ function App() {
                     path="/event/past/:eventId" 
                     element={
                       <ProtectedRoute>
-                        <UserOnlyRoute>
-                          <PastEventDetails />
-                        </UserOnlyRoute>
+                        <PastEventDetails />
                       </ProtectedRoute>
                     } 
                   />
