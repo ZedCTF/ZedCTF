@@ -1,7 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Eye, EyeOff, Shield, LogIn, Loader, Mail } from "lucide-react";
-import { signInWithEmailAndPassword, signInWithPopup, GithubAuthProvider, sendPasswordResetEmail } from "firebase/auth";
+import { Eye, EyeOff, Shield, LogIn, Loader, Mail, AlertCircle } from "lucide-react";
+import { 
+  signInWithEmailAndPassword, 
+  signInWithRedirect, 
+  GithubAuthProvider, 
+  sendPasswordResetEmail,
+  getRedirectResult,
+  linkWithCredential,
+  fetchSignInMethodsForEmail
+} from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import Navbar from "../components/Navbar";
@@ -16,6 +24,12 @@ const Login = () => {
   const [successMessage, setSuccessMessage] = useState("");
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
+  const [showLinkAccountModal, setShowLinkAccountModal] = useState(false);
+  const [linkAccountData, setLinkAccountData] = useState({
+    email: "",
+    password: "",
+    githubCredential: null as any
+  });
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -25,9 +39,173 @@ const Login = () => {
   const navigate = useNavigate();
   const githubProvider = new GithubAuthProvider();
 
-  // Add additional scopes if needed
   githubProvider.addScope('read:user');
   githubProvider.addScope('user:email');
+
+  // Handle OAuth redirect result when user returns from GitHub auth
+  useEffect(() => {
+    const handleOAuthRedirect = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result) {
+          setIsGitHubLoading(true);
+          const user = result.user;
+          console.log("OAuth redirect success:", user);
+          
+          // Check if this email already exists with password auth
+          const signInMethods = await fetchSignInMethodsForEmail(auth, user.email!);
+          console.log("Sign-in methods for email:", signInMethods);
+          
+          // Check if user document exists in Firestore to determine if it's a new user
+          const userDoc = await getDoc(doc(db, "users", user.uid));
+          const isNewUser = !userDoc.exists();
+          console.log("Is new user:", isNewUser);
+          
+          // If email exists with password auth but this GitHub account is new, prompt to link accounts
+          if (signInMethods.includes("password") && isNewUser) {
+            console.log("Account linking required");
+            setLinkAccountData({
+              email: user.email!,
+              password: "",
+              githubCredential: GithubAuthProvider.credentialFromResult(result)
+            });
+            setShowLinkAccountModal(true);
+            setIsGitHubLoading(false);
+            return;
+          }
+          
+          // Proceed with normal login or account creation
+          await handleUserLoginOrCreation(user, isNewUser);
+        }
+      } catch (error: any) {
+        console.error("OAuth redirect error:", error);
+        
+        // CORRECT HANDLING for account exists with different credential
+        if (error.code === 'auth/account-exists-with-different-credential') {
+          const email = error.customData?.email;
+          // The credential that was used
+          const pendingCred = error.credential;
+          
+          if (email) {
+            // Get available sign-in methods for this email
+            const methods = await fetchSignInMethodsForEmail(auth, email);
+            
+            if (methods.includes('password')) {
+              // Email/password account exists - prompt to link
+              setLinkAccountData({
+                email: email,
+                password: "",
+                githubCredential: pendingCred
+              });
+              setShowLinkAccountModal(true);
+            } else {
+              // Other OAuth provider exists - use plain string
+              setError(`An account already exists with ${email} using a different authentication method. Please sign in with your existing method first.`);
+            }
+          }
+        } else {
+          setError(getFirebaseErrorMessage(error.code));
+        }
+      } finally {
+        setIsGitHubLoading(false);
+      }
+    };
+
+    handleOAuthRedirect();
+  }, [navigate]);
+
+  // Handle account linking when user provides password
+  const handleAccountLinking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!linkAccountData.password) {
+      setError("Please enter your password to link accounts");
+      return;
+    }
+
+    setIsLoading(true);
+    setError("");
+
+    try {
+      // First, sign in with email/password
+      const userCredential = await signInWithEmailAndPassword(
+        auth, 
+        linkAccountData.email, 
+        linkAccountData.password
+      );
+      
+      // Then link the GitHub credential
+      if (linkAccountData.githubCredential) {
+        await linkWithCredential(userCredential.user, linkAccountData.githubCredential);
+        console.log("Accounts linked successfully");
+      }
+      
+      // Update user document
+      await updateUserDocument(userCredential.user);
+      
+      // Redirect
+      const redirectPath = await getRedirectPath(userCredential.user.uid);
+      setShowLinkAccountModal(false);
+      navigate(redirectPath);
+      
+    } catch (error: any) {
+      console.error("Account linking error:", error);
+      if (error.code === 'auth/wrong-password') {
+        setError("Incorrect password. Please try again.");
+      } else {
+        setError("Failed to link accounts. Please try again.");
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle normal user login or creation
+  const handleUserLoginOrCreation = async (user: any, isNewUser: boolean) => {
+    // Check if user document exists in Firestore
+    const userDoc = await getDoc(doc(db, "users", user.uid));
+    
+    if (!userDoc.exists() || isNewUser) {
+      // Create or update user document in Firestore
+      await setDoc(doc(db, "users", user.uid), {
+        uid: user.uid,
+        firstName: user.displayName?.split(' ')[0] || 'GitHub',
+        lastName: user.displayName?.split(' ').slice(1).join(' ') || 'User',
+        username: user.email?.split('@')[0] || `github_${user.uid.slice(0, 8)}`,
+        email: user.email,
+        displayName: user.displayName || 'GitHub User',
+        photoURL: user.photoURL,
+        provider: 'github',
+        role: 'user',
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        totalPoints: 0,
+        challengesSolved: 0,
+        currentRank: 0,
+        timeSpent: "0h 0m",
+        ...(userDoc.exists() ? userDoc.data() : {}) // Merge existing data if updating
+      }, { merge: true });
+      console.log("User document created/updated");
+    }
+    
+    // Redirect to appropriate page based on user role
+    const redirectPath = await getRedirectPath(user.uid);
+    console.log("Redirecting to:", redirectPath);
+    navigate(redirectPath, { replace: true });
+  };
+
+  // Update user document (common function)
+  const updateUserDocument = async (user: any) => {
+    const userDoc = await getDoc(doc(db, "users", user.uid));
+    await setDoc(doc(db, "users", user.uid), {
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName || userDoc.data()?.displayName,
+      photoURL: user.photoURL || userDoc.data()?.photoURL,
+      updatedAt: new Date(),
+      ...userDoc.data() // Merge existing data
+    }, { merge: true });
+  };
 
   // Function to determine redirect path based on user role
   const getRedirectPath = async (userId: string) => {
@@ -35,16 +213,13 @@ const Login = () => {
       const userDoc = await getDoc(doc(db, "users", userId));
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        // Redirect admins and moderators to admin panel
         if (userData.role === 'admin' || userData.role === 'moderator') {
           return "/admin";
         }
       }
-      // Regular users go to dashboard
       return "/dashboard";
     } catch (error) {
       console.error("Error checking user role:", error);
-      // Default to dashboard if there's an error
       return "/dashboard";
     }
   };
@@ -73,55 +248,11 @@ const Login = () => {
     setSuccessMessage("");
 
     try {
-      const result = await signInWithPopup(auth, githubProvider);
-      const user = result.user;
-      
-      // Check if user document exists in Firestore
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      
-      if (!userDoc.exists()) {
-        // Create user document in Firestore if it doesn't exist
-        await setDoc(doc(db, "users", user.uid), {
-          uid: user.uid,
-          firstName: user.displayName?.split(' ')[0] || 'GitHub',
-          lastName: user.displayName?.split(' ').slice(1).join(' ') || 'User',
-          username: user.email?.split('@')[0] || `github_${user.uid.slice(0, 8)}`,
-          email: user.email,
-          displayName: user.displayName || 'GitHub User',
-          photoURL: user.photoURL,
-          provider: 'github',
-          role: 'user', // Default role for new users
-          isActive: true,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          totalPoints: 0,
-          challengesSolved: 0,
-          currentRank: 0,
-          timeSpent: "0h 0m"
-        });
-        
-        // New users go to dashboard
-        navigate("/dashboard");
-      } else {
-        // Existing users - check their role for redirect
-        const redirectPath = await getRedirectPath(user.uid);
-        navigate(redirectPath);
-      }
-
+      console.log("Initiating GitHub OAuth redirect...");
+      await signInWithRedirect(auth, githubProvider);
     } catch (error: any) {
       console.error("GitHub login error:", error);
-      
-      if (error.code === 'auth/account-exists-with-different-credential') {
-        setError("An account already exists with the same email address but different sign-in credentials. Try signing in with email instead.");
-      } else if (error.code === 'auth/popup-closed-by-user') {
-        // User closed the popup, no need to show error
-        console.log("GitHub login popup closed by user");
-      } else if (error.code === 'auth/unauthorized-domain') {
-        setError("GitHub login is not configured for this domain. Please contact support.");
-      } else {
-        setError("GitHub login failed. Please try again.");
-      }
-    } finally {
+      setError(getFirebaseErrorMessage(error.code));
       setIsGitHubLoading(false);
     }
   };
@@ -172,9 +303,15 @@ const Login = () => {
       case "auth/too-many-requests":
         return "Too many failed attempts. Please try again later.";
       case "auth/account-exists-with-different-credential":
-        return "An account already exists with the same email address but different sign-in credentials.";
+        return "An account already exists with this email using a different sign-in method. Please sign in with your existing method.";
+      case "auth/email-already-in-use":
+        return "This email is already associated with an account.";
+      case "auth/credential-already-in-use":
+        return "This credential is already associated with a different user account.";
       case "auth/unauthorized-domain":
         return "This authentication method is not allowed from this domain.";
+      case "auth/operation-not-allowed":
+        return "GitHub login is not enabled. Please contact the administrator.";
       default:
         return "Login failed. Please try again.";
     }
@@ -188,9 +325,17 @@ const Login = () => {
     }));
   };
 
+  const handleLinkAccountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setLinkAccountData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
   const openResetModal = () => {
     setShowResetModal(true);
-    setResetEmail(formData.email); // Pre-fill with the email from login form
+    setResetEmail(formData.email);
     setError("");
     setSuccessMessage("");
   };
@@ -200,6 +345,16 @@ const Login = () => {
     setResetEmail("");
     setError("");
     setSuccessMessage("");
+  };
+
+  const closeLinkAccountModal = () => {
+    setShowLinkAccountModal(false);
+    setLinkAccountData({
+      email: "",
+      password: "",
+      githubCredential: null
+    });
+    setError("");
   };
 
   return (
@@ -222,7 +377,10 @@ const Login = () => {
             {/* Error Message */}
             {error && (
               <div className="mb-6 bg-destructive/10 border border-destructive/20 text-destructive px-4 py-3 rounded-lg text-sm">
-                {error}
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">{error}</div>
+                </div>
               </div>
             )}
 
@@ -250,7 +408,7 @@ const Login = () => {
                     onChange={handleChange}
                     className="w-full px-4 py-3 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
                     placeholder="hacker@zedctf.com"
-                    disabled={isLoading}
+                    disabled={isLoading || isGitHubLoading}
                   />
                 </div>
               </div>
@@ -270,13 +428,13 @@ const Login = () => {
                     onChange={handleChange}
                     className="w-full px-4 py-3 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all pr-12"
                     placeholder="••••••••"
-                    disabled={isLoading}
+                    disabled={isLoading || isGitHubLoading}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    disabled={isLoading}
+                    disabled={isLoading || isGitHubLoading}
                   >
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
@@ -292,7 +450,7 @@ const Login = () => {
                     checked={formData.rememberMe}
                     onChange={handleChange}
                     className="w-4 h-4 text-primary bg-background border-border rounded focus:ring-primary focus:ring-2"
-                    disabled={isLoading}
+                    disabled={isLoading || isGitHubLoading}
                   />
                   <span className="ml-2 text-sm text-muted-foreground">Remember me</span>
                 </label>
@@ -300,6 +458,7 @@ const Login = () => {
                   type="button" 
                   onClick={openResetModal}
                   className="text-sm text-primary hover:text-primary/80 transition-colors"
+                  disabled={isLoading || isGitHubLoading}
                 >
                   Forgot password?
                 </button>
@@ -308,7 +467,7 @@ const Login = () => {
               {/* Submit Button */}
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={isLoading || isGitHubLoading}
                 className="w-full bg-primary text-primary-foreground py-3 px-4 rounded-lg font-semibold hover:bg-primary/90 transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 group disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
               >
                 {isLoading ? (
@@ -341,7 +500,7 @@ const Login = () => {
                     <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
                   </svg>
                 )}
-                {isGitHubLoading ? 'Signing in with GitHub...' : 'Continue with GitHub'}
+                {isGitHubLoading ? 'Redirecting to GitHub...' : 'Continue with GitHub'}
               </button>
             </div>
 
@@ -425,6 +584,75 @@ const Login = () => {
                       <Mail className="w-4 h-4" />
                     )}
                     {isResettingPassword ? 'Sending...' : 'Send Reset Link'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Account Linking Modal */}
+      {showLinkAccountModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-md">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-foreground">Link Your Accounts</h3>
+                <button
+                  onClick={closeLinkAccountModal}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  disabled={isLoading}
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              <p className="text-muted-foreground mb-4">
+                An account already exists with <strong>{linkAccountData.email}</strong> using email/password. 
+                Enter your password to link your GitHub account.
+              </p>
+
+              <form onSubmit={handleAccountLinking} className="space-y-4">
+                <div>
+                  <label htmlFor="linkPassword" className="block text-sm font-medium text-foreground mb-2">
+                    Password
+                  </label>
+                  <input
+                    id="linkPassword"
+                    name="password"
+                    type="password"
+                    value={linkAccountData.password}
+                    onChange={handleLinkAccountChange}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                    placeholder="Enter your password"
+                    required
+                    disabled={isLoading}
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={closeLinkAccountModal}
+                    disabled={isLoading}
+                    className="flex-1 px-4 py-2 border border-border text-foreground rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isLoading ? (
+                      <Loader className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Shield className="w-4 h-4" />
+                    )}
+                    {isLoading ? 'Linking...' : 'Link Accounts'}
                   </button>
                 </div>
               </form>
