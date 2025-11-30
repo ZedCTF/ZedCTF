@@ -167,7 +167,7 @@ const AdminDashboard = () => {
   const renderActiveView = () => {
     switch (activeView) {
       case "users":
-        return <UserManagement onBack={() => setActiveView("overview")} />;
+        return isAdmin ? <UserManagement onBack={() => setActiveView("overview")} /> : renderAccessDenied();
       case "event-management":
         return (
           <EventManagement 
@@ -242,15 +242,26 @@ const AdminDashboard = () => {
           />
         );
       case "review-writeups":
-        return <WriteupReview onBack={() => setActiveView("overview")} />;
+        return isAdmin ? <WriteupReview onBack={() => setActiveView("overview")} /> : renderAccessDenied();
       case "analytics":
-        return <PlatformAnalytics onBack={() => setActiveView("overview")} />;
+        return isAdmin ? <PlatformAnalytics onBack={() => setActiveView("overview")} /> : renderAccessDenied();
       case "settings":
-        return <SystemSettings onBack={() => setActiveView("overview")} />;
+        return isAdmin ? <SystemSettings onBack={() => setActiveView("overview")} /> : renderAccessDenied();
       default:
         return renderOverview();
     }
   };
+
+  const renderAccessDenied = () => (
+    <div className="text-center py-8">
+      <Shield className="w-12 h-12 text-destructive mx-auto mb-4" />
+      <h3 className="text-lg font-bold mb-2">Access Restricted</h3>
+      <p className="text-muted-foreground">This feature is only available to administrators.</p>
+      <Button onClick={() => setActiveView("overview")} className="mt-4">
+        Back to Dashboard
+      </Button>
+    </div>
+  );
 
   const renderOverview = () => (
     <>
@@ -347,14 +358,16 @@ const AdminDashboard = () => {
               <Edit3 className="w-4 h-4" />
               Manage Events
             </Button>
-            <Button 
-              variant="outline" 
-              className="w-full justify-start gap-2"
-              onClick={() => setActiveView("review-writeups")}
-            >
-              <FileText className="w-4 h-4" />
-              Review Write-ups
-            </Button>
+            {isAdmin && (
+              <Button 
+                variant="outline" 
+                className="w-full justify-start gap-2"
+                onClick={() => setActiveView("review-writeups")}
+              >
+                <FileText className="w-4 h-4" />
+                Review Write-ups
+              </Button>
+            )}
           </CardContent>
         </Card>
 
@@ -364,13 +377,15 @@ const AdminDashboard = () => {
             <CardDescription>Manage users and permissions</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button 
-              className="w-full justify-start gap-2"
-              onClick={() => setActiveView("users")}
-            >
-              <Users className="w-4 h-4" />
-              View All Users
-            </Button>
+            {isAdmin && (
+              <Button 
+                className="w-full justify-start gap-2"
+                onClick={() => setActiveView("users")}
+              >
+                <Users className="w-4 h-4" />
+                View All Users
+              </Button>
+            )}
             {isAdmin && (
               <Button 
                 variant="outline" 
@@ -381,14 +396,23 @@ const AdminDashboard = () => {
                 Platform Analytics
               </Button>
             )}
-            <Button 
-              variant="outline" 
-              className="w-full justify-start gap-2"
-              onClick={() => setActiveView("settings")}
-            >
-              <Settings className="w-4 h-4" />
-              System Settings
-            </Button>
+            {isAdmin && (
+              <Button 
+                variant="outline" 
+                className="w-full justify-start gap-2"
+                onClick={() => setActiveView("settings")}
+              >
+                <Settings className="w-4 h-4" />
+                System Settings
+              </Button>
+            )}
+            {!isAdmin && (
+              <div className="text-center py-4">
+                <p className="text-sm text-muted-foreground">
+                  User management features are only available to administrators.
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -419,14 +443,14 @@ const AdminDashboard = () => {
                 </h1>
                 <p className="text-muted-foreground">
                   {activeView === "overview" 
-                    ? "Manage your CTF platform, users, challenges, and events"
+                    ? `Manage your CTF platform${isAdmin ? ', users, challenges, and events' : ' challenges and events'}`
                     : activeView === "event-management"
                     ? "View and manage all your created events"
                     : activeView === "challenge-management"
                     ? "Create new challenges or add existing ones to your events"
                     : activeView === "add-challenges"
                     ? "Add challenges to your event"
-                    : "Admin management panel"
+                    : isAdmin ? "Admin management panel" : "Moderator management panel"
                   }
                 </p>
               </div>
