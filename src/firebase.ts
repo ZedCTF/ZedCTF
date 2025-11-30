@@ -5,10 +5,10 @@ import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
-// Your web app's Firebase configuration
+// Your web app's Firebase configuration - UPDATED for GitHub Pages
 const firebaseConfig = {
   apiKey: "AIzaSyAVk3CIK5hyAmjwVPh1p4i01vq-0Z5IsEA",
-  authDomain: "zedctf.firebaseapp.com",
+  authDomain: "zedctf.github.io", // Changed from zedctf.firebaseapp.com
   projectId: "zedctf",
   storageBucket: "zedctf.firebasestorage.app",
   messagingSenderId: "574551910114",

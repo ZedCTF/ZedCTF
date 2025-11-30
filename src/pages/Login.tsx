@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Eye, EyeOff, Shield, LogIn, Loader } from "lucide-react";
-import { signInWithEmailAndPassword, signInWithPopup, GithubAuthProvider } from "firebase/auth";
+import { Eye, EyeOff, Shield, LogIn, Loader, Mail } from "lucide-react";
+import { signInWithEmailAndPassword, signInWithPopup, GithubAuthProvider, sendPasswordResetEmail } from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import Navbar from "../components/Navbar";
@@ -11,7 +11,11 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isGitHubLoading, setIsGitHubLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -48,6 +52,7 @@ const Login = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setSuccessMessage("");
     setIsLoading(true);
 
     try {
@@ -65,6 +70,7 @@ const Login = () => {
   const handleGitHubLogin = async () => {
     setIsGitHubLoading(true);
     setError("");
+    setSuccessMessage("");
 
     try {
       const result = await signInWithPopup(auth, githubProvider);
@@ -106,15 +112,50 @@ const Login = () => {
       console.error("GitHub login error:", error);
       
       if (error.code === 'auth/account-exists-with-different-credential') {
-        setError("An account already exists with the same email address but different sign-in credentials.");
+        setError("An account already exists with the same email address but different sign-in credentials. Try signing in with email instead.");
       } else if (error.code === 'auth/popup-closed-by-user') {
         // User closed the popup, no need to show error
         console.log("GitHub login popup closed by user");
+      } else if (error.code === 'auth/unauthorized-domain') {
+        setError("GitHub login is not configured for this domain. Please contact support.");
       } else {
         setError("GitHub login failed. Please try again.");
       }
     } finally {
       setIsGitHubLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail.trim()) {
+      setError("Please enter your email address");
+      return;
+    }
+
+    setIsResettingPassword(true);
+    setError("");
+    setSuccessMessage("");
+
+    try {
+      await sendPasswordResetEmail(auth, resetEmail.trim());
+      setSuccessMessage(`Password reset email sent to ${resetEmail}. Please check your inbox and spam folder.`);
+      setResetEmail("");
+      setTimeout(() => {
+        setShowResetModal(false);
+        setSuccessMessage("");
+      }, 5000);
+    } catch (error: any) {
+      console.error("Password reset error:", error);
+      if (error.code === 'auth/user-not-found') {
+        setError("No account found with this email address.");
+      } else if (error.code === 'auth/invalid-email') {
+        setError("Invalid email address format.");
+      } else {
+        setError("Failed to send reset email. Please try again.");
+      }
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
@@ -132,6 +173,8 @@ const Login = () => {
         return "Too many failed attempts. Please try again later.";
       case "auth/account-exists-with-different-credential":
         return "An account already exists with the same email address but different sign-in credentials.";
+      case "auth/unauthorized-domain":
+        return "This authentication method is not allowed from this domain.";
       default:
         return "Login failed. Please try again.";
     }
@@ -143,6 +186,20 @@ const Login = () => {
       ...prev,
       [name]: type === 'checkbox' ? checked : value
     }));
+  };
+
+  const openResetModal = () => {
+    setShowResetModal(true);
+    setResetEmail(formData.email); // Pre-fill with the email from login form
+    setError("");
+    setSuccessMessage("");
+  };
+
+  const closeResetModal = () => {
+    setShowResetModal(false);
+    setResetEmail("");
+    setError("");
+    setSuccessMessage("");
   };
 
   return (
@@ -166,6 +223,13 @@ const Login = () => {
             {error && (
               <div className="mb-6 bg-destructive/10 border border-destructive/20 text-destructive px-4 py-3 rounded-lg text-sm">
                 {error}
+              </div>
+            )}
+
+            {/* Success Message */}
+            {successMessage && (
+              <div className="mb-6 bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-lg text-sm">
+                {successMessage}
               </div>
             )}
 
@@ -232,9 +296,13 @@ const Login = () => {
                   />
                   <span className="ml-2 text-sm text-muted-foreground">Remember me</span>
                 </label>
-                <a href="#" className="text-sm text-primary hover:text-primary/80 transition-colors">
+                <button 
+                  type="button" 
+                  onClick={openResetModal}
+                  className="text-sm text-primary hover:text-primary/80 transition-colors"
+                >
                   Forgot password?
-                </a>
+                </button>
               </div>
 
               {/* Submit Button */}
@@ -297,6 +365,73 @@ const Login = () => {
         </div>
       </div>
       <Footer />
+
+      {/* Password Reset Modal */}
+      {showResetModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-md">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-foreground">Reset Your Password</h3>
+                <button
+                  onClick={closeResetModal}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  disabled={isResettingPassword}
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              <p className="text-muted-foreground mb-4">
+                Enter your email address and we'll send you a link to reset your password.
+              </p>
+
+              <form onSubmit={handlePasswordReset} className="space-y-4">
+                <div>
+                  <label htmlFor="resetEmail" className="block text-sm font-medium text-foreground mb-2">
+                    Email Address
+                  </label>
+                  <input
+                    id="resetEmail"
+                    type="email"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                    placeholder="Enter your email"
+                    required
+                    disabled={isResettingPassword}
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={closeResetModal}
+                    disabled={isResettingPassword}
+                    className="flex-1 px-4 py-2 border border-border text-foreground rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isResettingPassword}
+                    className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isResettingPassword ? (
+                      <Loader className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Mail className="w-4 h-4" />
+                    )}
+                    {isResettingPassword ? 'Sending...' : 'Send Reset Link'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
