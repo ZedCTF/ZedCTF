@@ -4,6 +4,7 @@ import { doc, updateDoc, getDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../../firebase";
 import { useAuthContext } from "../../contexts/AuthContext";
+import { useAdminContext } from "../../contexts/AdminContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +13,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { X, Plus, Upload, Link, FileText, User, ExternalLink, Save, Star, Shield } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { X, Plus, Upload, Link, FileText, User, ExternalLink, Save, Star, Shield, Lock, AlertCircle } from "lucide-react";
 
 interface ChallengeEditProps {
   challengeId: string;
@@ -42,12 +44,39 @@ interface ExternalSource {
   license: string;
 }
 
+interface ChallengeData {
+  title: string;
+  description: string;
+  category: string;
+  customCategory: string;
+  difficulty: string;
+  points: number;
+  flag: string;
+  flagFormat: string;
+  hasMultipleQuestions: boolean;
+  isExternalChallenge: boolean;
+  isActive: boolean;
+  hints: string[];
+  files: FileAttachment[];
+  creator: string;
+  creatorUrl: string;
+  featuredOnPractice: boolean;
+  availableInPractice: boolean;
+  challengeType: 'practice' | 'live' | 'past_event';
+  externalSource: ExternalSource;
+  createdById?: string; // Add createdById to track ownership
+}
+
 const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
   const { user } = useAuthContext();
+  const { isAdmin, isModerator } = useAdminContext();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<Set<string>>(new Set());
-  const [formData, setFormData] = useState({
+  const [accessDenied, setAccessDenied] = useState(false);
+  const [challengeOwner, setChallengeOwner] = useState<string>("");
+  
+  const [formData, setFormData] = useState<ChallengeData>({
     title: "",
     description: "",
     category: "web",
@@ -60,24 +89,30 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
     isExternalChallenge: false,
     isActive: true,
     hints: [""],
-    files: [] as FileAttachment[],
+    files: [],
     creator: "",
     creatorUrl: "",
+    featuredOnPractice: false,
+    availableInPractice: true,
+    challengeType: 'practice',
     externalSource: {
       ctfName: "",
       ctfUrl: "",
       originalAuthor: "",
       authorUrl: "",
       license: "unknown"
-    } as ExternalSource,
-    // NEW: Practice-related fields
-    featuredOnPractice: false,
-    availableInPractice: true,
-    challengeType: 'practice' as 'practice' | 'live' | 'past_event'
+    }
   });
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [showCustomCategory, setShowCustomCategory] = useState(false);
+
+  // Check if current user can edit this challenge
+  const canEditChallenge = (): boolean => {
+    if (isAdmin) return true;
+    if (isModerator && user && challengeOwner === user.uid) return true;
+    return false;
+  };
 
   // Calculate total points for multi-question challenges
   const totalPoints = formData.hasMultipleQuestions 
@@ -120,6 +155,16 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
       if (challengeDoc.exists()) {
         const challengeData = challengeDoc.data();
         
+        // Check permissions
+        const challengeCreatedById = challengeData.createdById;
+        setChallengeOwner(challengeCreatedById);
+        
+        if (!canEditChallenge() && challengeCreatedById !== user?.uid) {
+          setAccessDenied(true);
+          setLoading(false);
+          return;
+        }
+
         // Set form data from challenge
         setFormData({
           title: challengeData.title || "",
@@ -137,7 +182,6 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
           files: challengeData.files || [],
           creator: challengeData.originalCreator?.name || "",
           creatorUrl: challengeData.originalCreator?.url || "",
-          // NEW: Load practice fields
           featuredOnPractice: challengeData.featuredOnPractice || false,
           availableInPractice: challengeData.availableInPractice !== false,
           challengeType: challengeData.challengeType || 'practice',
@@ -147,7 +191,8 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
             originalAuthor: challengeData.attribution?.originalAuthor || "",
             authorUrl: challengeData.attribution?.authorUrl || "",
             license: challengeData.attribution?.license || "unknown"
-          }
+          },
+          createdById: challengeCreatedById
         });
 
         // Set questions if it's a multi-question challenge
@@ -184,6 +229,13 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Double-check permissions before saving
+    if (!canEditChallenge()) {
+      alert("You do not have permission to edit this challenge");
+      return;
+    }
+    
     setSaving(true);
     
     try {
@@ -199,7 +251,7 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
         updatedAt: new Date(),
         updatedBy: user?.uid,
         updatedByName: user?.displayName || user?.email,
-        // NEW: Include practice fields
+        // Include practice fields
         featuredOnPractice: formData.featuredOnPractice,
         availableInPractice: formData.availableInPractice,
         challengeType: formData.challengeType,
@@ -391,6 +443,28 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
     }
   };
 
+  // Render access denied message
+  if (accessDenied) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              <div className="space-y-2">
+                <p className="font-semibold">Access Denied</p>
+                <p>You do not have permission to edit this challenge. Only the challenge creator or administrators can modify this challenge.</p>
+                <Button onClick={onBack} className="mt-2">
+                  Back to Challenges
+                </Button>
+              </div>
+            </AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (loading) {
     return (
       <Card>
@@ -404,10 +478,20 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Edit Challenge</CardTitle>
-        <CardDescription>
-          Update challenge details and configuration
-        </CardDescription>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>Edit Challenge</CardTitle>
+            <CardDescription>
+              Update challenge details and configuration
+            </CardDescription>
+          </div>
+          {!isAdmin && (
+            <Badge variant="outline" className="bg-blue-50">
+              <Lock className="w-3 h-3 mr-1" />
+              Editing Your Challenge
+            </Badge>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
