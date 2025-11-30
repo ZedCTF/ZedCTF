@@ -1,6 +1,6 @@
 // src/components/admin/AddChallenges.tsx
 import { useState, useEffect } from "react";
-import { collection, getDocs, query, where, doc, updateDoc } from "firebase/firestore";
+import { collection, getDocs, query, where, doc, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
 import { db } from "../../firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,7 @@ interface Challenge {
   difficulty: "Easy" | "Medium" | "Hard" | "Expert";
   solvedBy?: string[];
   isActive: boolean;
-  eventId?: string;
+  eventIds?: string[]; // Changed from eventId to eventIds array
   createdById?: string;
 }
 
@@ -98,7 +98,7 @@ const AddChallenges = ({ event, onBack, onChallengesAdded, onCreateNewChallenge,
     try {
       setLoading(true);
       
-      // Get all active challenges that are not assigned to any event or assigned to this event
+      // Get all active challenges
       const challengesQuery = query(
         collection(db, "challenges"),
         where("isActive", "==", true)
@@ -114,17 +114,14 @@ const AddChallenges = ({ event, onBack, onChallengesAdded, onCreateNewChallenge,
           ...data
         } as Challenge;
 
-        // Only show challenges that are not assigned to any event or already assigned to this event
-        if (!data.eventId || data.eventId === event.id) {
-          challengesData.push(challenge);
-        }
+        challengesData.push(challenge);
       });
 
       setChallenges(challengesData);
       
       // Pre-select challenges already assigned to this event
       const preSelected = challengesData
-        .filter(challenge => challenge.eventId === event.id)
+        .filter(challenge => challenge.eventIds?.includes(event.id))
         .map(challenge => challenge.id);
       setSelectedChallenges(new Set(preSelected));
 
@@ -204,25 +201,25 @@ const AddChallenges = ({ event, onBack, onChallengesAdded, onCreateNewChallenge,
     try {
       const selectedChallengeIds = Array.from(selectedChallenges);
       
-      // Update each selected challenge with the event ID
-      const updatePromises = selectedChallengeIds.map(challengeId =>
+      // Add event ID to each selected challenge's eventIds array
+      const addPromises = selectedChallengeIds.map(challengeId =>
         updateDoc(doc(db, "challenges", challengeId), {
-          eventId: event.id
+          eventIds: arrayUnion(event.id)
         })
       );
 
-      await Promise.all(updatePromises);
+      await Promise.all(addPromises);
 
-      // Remove eventId from challenges that were deselected
+      // Remove event ID from challenges that were deselected
       const challengesToRemove = challenges
         .filter(challenge => 
-          challenge.eventId === event.id && !selectedChallenges.has(challenge.id)
+          challenge.eventIds?.includes(event.id) && !selectedChallenges.has(challenge.id)
         )
         .map(challenge => challenge.id);
 
       const removePromises = challengesToRemove.map(challengeId =>
         updateDoc(doc(db, "challenges", challengeId), {
-          eventId: null
+          eventIds: arrayRemove(event.id)
         })
       );
 
@@ -544,7 +541,7 @@ const AddChallenges = ({ event, onBack, onChallengesAdded, onCreateNewChallenge,
                             eventLocked ? 'border-gray-200' : 'border-gray-300'
                           }`} />
                         )}
-                        {eventLocked && challenge.eventId === event.id && (
+                        {eventLocked && challenge.eventIds?.includes(event.id) && (
                           <Lock className="w-4 h-4 text-amber-500" />
                         )}
                       </div>
@@ -558,9 +555,10 @@ const AddChallenges = ({ event, onBack, onChallengesAdded, onCreateNewChallenge,
                       {challenge.solvedBy && challenge.solvedBy.length > 0 && (
                         <span>{challenge.solvedBy.length} solves</span>
                       )}
-                      {challenge.eventId === event.id && (
+                      {challenge.eventIds && challenge.eventIds.length > 0 && (
                         <Badge variant="outline" className="text-xs">
-                          {eventLocked ? 'Locked in event' : 'Currently in this event'}
+                          Used in {challenge.eventIds.length} event(s)
+                          {challenge.eventIds.includes(event.id) && " • Currently in this event"}
                         </Badge>
                       )}
                     </div>
