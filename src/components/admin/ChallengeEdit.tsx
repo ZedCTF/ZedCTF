@@ -1,7 +1,8 @@
 // src/components/admin/ChallengeEdit.tsx
 import { useState, useEffect } from "react";
 import { doc, updateDoc, getDoc } from "firebase/firestore";
-import { db } from "../../firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "../../firebase";
 import { useAuthContext } from "../../contexts/AuthContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { X, Plus, Upload, Link, FileText, User, ExternalLink, Save, Star, Shield } from "lucide-react";
 
 interface ChallengeEditProps {
@@ -44,6 +46,7 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
   const { user } = useAuthContext();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState<Set<string>>(new Set());
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -75,6 +78,37 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [showCustomCategory, setShowCustomCategory] = useState(false);
+
+  // Calculate total points for multi-question challenges
+  const totalPoints = formData.hasMultipleQuestions 
+    ? questions.reduce((sum, q) => sum + q.points, 0)
+    : formData.points;
+
+  // Auto-adjust difficulty based on total points for multi-question challenges
+  useEffect(() => {
+    if (formData.hasMultipleQuestions) {
+      let suggestedDifficulty = "easy";
+      
+      if (totalPoints > 300) {
+        suggestedDifficulty = "hard";
+      } else if (totalPoints > 100) {
+        suggestedDifficulty = "medium";
+      } else {
+        suggestedDifficulty = "easy";
+      }
+
+      // Only auto-update if the current difficulty doesn't match the suggested one
+      const currentDifficultyPoints = {
+        easy: { min: 1, max: 100 },
+        medium: { min: 101, max: 300 },
+        hard: { min: 301, max: 1000 }
+      }[formData.difficulty];
+
+      if (totalPoints < currentDifficultyPoints.min || totalPoints > currentDifficultyPoints.max) {
+        setFormData(prev => ({ ...prev, difficulty: suggestedDifficulty }));
+      }
+    }
+  }, [totalPoints, formData.hasMultipleQuestions]);
 
   useEffect(() => {
     loadChallenge();
@@ -134,6 +168,20 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
     }
   };
 
+  // File upload function
+  const uploadFileToStorage = async (file: File): Promise<string> => {
+    try {
+      const fileName = `challenge-files/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const storageRef = ref(storage, fileName);
+      const snapshot = await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(snapshot.ref);
+      return downloadURL;
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      throw new Error("Failed to upload file");
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -144,9 +192,10 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
         finalCategory: showCustomCategory ? formData.customCategory : formData.category,
         questions: formData.hasMultipleQuestions ? questions : [],
         hints: formData.hints.filter(hint => hint.trim() !== ""),
-        totalPoints: formData.hasMultipleQuestions 
-          ? questions.reduce((sum, q) => sum + q.points, 0)
-          : formData.points,
+        // Use calculated total points
+        totalPoints: totalPoints,
+        // For multi-question challenges, ensure points field is consistent
+        points: formData.hasMultipleQuestions ? totalPoints : formData.points,
         updatedAt: new Date(),
         updatedBy: user?.uid,
         updatedByName: user?.displayName || user?.email,
@@ -181,7 +230,7 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
     }
   };
 
-  // Helper functions (same as ChallengeCreation)
+  // Helper functions
   const addHint = () => {
     setFormData({
       ...formData,
@@ -222,10 +271,17 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
     }
   };
 
-  const addFileAttachment = (type: 'file' | 'link') => {
+  const addFileAttachment = async (type: 'file' | 'link') => {
     if (type === 'link') {
       const url = prompt("Enter the URL:");
       if (url) {
+        try {
+          new URL(url);
+        } catch {
+          alert("Please enter a valid URL");
+          return;
+        }
+
         const newFile: FileAttachment = {
           id: Date.now().toString(),
           name: `Link - ${new Date().toLocaleDateString()}`,
@@ -240,19 +296,55 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
     } else {
       const input = document.createElement('input');
       input.type = 'file';
-      input.onchange = (e) => {
-        const file = (e.target as HTMLInputElement).files?.[0];
-        if (file) {
-          const newFile: FileAttachment = {
-            id: Date.now().toString(),
-            name: file.name,
-            url: URL.createObjectURL(file),
-            type: 'file'
-          };
-          setFormData({
-            ...formData,
-            files: [...formData.files, newFile]
-          });
+      input.multiple = true;
+      input.accept = ".zip,.txt,.pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.py,.js,.html,.css,.xml,.json";
+      
+      input.onchange = async (e) => {
+        const files = (e.target as HTMLInputElement).files;
+        if (files && files.length > 0) {
+          for (const file of Array.from(files)) {
+            const fileId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+            
+            setUploadingFiles(prev => new Set(prev).add(fileId));
+            
+            try {
+              const tempFile: FileAttachment = {
+                id: fileId,
+                name: file.name,
+                url: "uploading...",
+                type: 'file'
+              };
+              
+              setFormData(prev => ({
+                ...prev,
+                files: [...prev.files, tempFile]
+              }));
+
+              const fileUrl = await uploadFileToStorage(file);
+              
+              setFormData(prev => ({
+                ...prev,
+                files: prev.files.map(f => 
+                  f.id === fileId ? { ...f, url: fileUrl } : f
+                )
+              }));
+              
+            } catch (error) {
+              console.error(`Error uploading file ${file.name}:`, error);
+              alert(`Failed to upload ${file.name}. Please try again.`);
+              
+              setFormData(prev => ({
+                ...prev,
+                files: prev.files.filter(f => f.id !== fileId)
+              }));
+            } finally {
+              setUploadingFiles(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(fileId);
+                return newSet;
+              });
+            }
+          }
         }
       };
       input.click();
@@ -284,6 +376,19 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
         [field]: value
       }
     });
+  };
+
+  const getDifficultyDescription = () => {
+    if (formData.hasMultipleQuestions) {
+      return `Overall challenge difficulty based on ${questions.length} questions (${totalPoints} total points)`;
+    }
+    
+    switch (formData.difficulty) {
+      case "easy": return "Easy (1-100 points)";
+      case "medium": return "Medium (101-300 points)";
+      case "hard": return "Hard (301-500 points)";
+      default: return "Select difficulty";
+    }
   };
 
   if (loading) {
@@ -421,17 +526,33 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
               )}
 
               <div>
-                <Label htmlFor="difficulty">Difficulty</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="difficulty">Difficulty</Label>
+                  {formData.hasMultipleQuestions && (
+                    <Badge variant="outline" className="text-xs">
+                      {totalPoints} total points
+                    </Badge>
+                  )}
+                </div>
                 <Select value={formData.difficulty} onValueChange={(value) => setFormData({...formData, difficulty: value})}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="easy">Easy (1-100 points)</SelectItem>
-                    <SelectItem value="medium">Medium (101-300 points)</SelectItem>
-                    <SelectItem value="hard">Hard (301-500 points)</SelectItem>
+                    <SelectItem value="easy">
+                      Easy {formData.hasMultipleQuestions ? "(1-100 total points)" : "(1-100 points)"}
+                    </SelectItem>
+                    <SelectItem value="medium">
+                      Medium {formData.hasMultipleQuestions ? "(101-300 total points)" : "(101-300 points)"}
+                    </SelectItem>
+                    <SelectItem value="hard">
+                      Hard {formData.hasMultipleQuestions ? "(301-500 total points)" : "(301-500 points)"}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {getDifficultyDescription()}
+                </p>
               </div>
 
               {!formData.hasMultipleQuestions && (
@@ -613,7 +734,12 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
           {formData.hasMultipleQuestions && (
             <div className="space-y-4 p-4 border rounded-lg">
               <div className="flex items-center justify-between">
-                <Label className="text-base">Challenge Questions</Label>
+                <div>
+                  <Label className="text-base">Challenge Questions</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Total Points: <strong>{totalPoints}</strong> | Questions: {questions.length}
+                  </p>
+                </div>
                 <Button type="button" onClick={addQuestion} variant="outline" size="sm">
                   <Plus className="w-4 h-4 mr-1" />
                   Add Question
@@ -673,12 +799,6 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
                   </div>
                 </div>
               ))}
-              
-              {questions.length > 0 && (
-                <div className="text-sm text-muted-foreground">
-                  Total Points: {questions.reduce((sum, q) => sum + q.points, 0)}
-                </div>
-              )}
             </div>
           )}
 
@@ -733,6 +853,7 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
                 type="button" 
                 variant="outline" 
                 onClick={() => addFileAttachment('file')}
+                disabled={uploadingFiles.size > 0}
               >
                 <Upload className="w-4 h-4 mr-2" />
                 Upload File
@@ -747,6 +868,12 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
               </Button>
             </div>
             
+            {uploadingFiles.size > 0 && (
+              <div className="text-sm text-muted-foreground">
+                Uploading {uploadingFiles.size} file(s)... Please wait.
+              </div>
+            )}
+            
             {formData.files.length > 0 && (
               <div className="space-y-2">
                 {formData.files.map((file) => (
@@ -754,9 +881,15 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
                     <div className="flex items-center space-x-2">
                       {file.type === 'file' ? <FileText className="w-4 h-4" /> : <Link className="w-4 h-4" />}
                       <span className="text-sm">{file.name}</span>
-                      {file.type === 'link' && (
+                      {file.type === 'link' ? (
                         <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-xs">
                           (View Link)
+                        </a>
+                      ) : file.url === "uploading..." ? (
+                        <span className="text-xs text-orange-600">(Uploading...)</span>
+                      ) : (
+                        <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-xs">
+                          (Download)
                         </a>
                       )}
                     </div>
@@ -765,6 +898,7 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
                       variant="ghost"
                       size="sm"
                       onClick={() => removeFile(file.id)}
+                      disabled={file.url === "uploading..."}
                     >
                       <X className="w-4 h-4" />
                     </Button>
@@ -804,7 +938,7 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
 
           {/* Action Buttons */}
           <div className="flex gap-2 pt-4">
-            <Button type="submit" disabled={saving}>
+            <Button type="submit" disabled={saving || uploadingFiles.size > 0}>
               <Save className="w-4 h-4 mr-2" />
               {saving ? "Saving..." : "Save Changes"}
             </Button>
@@ -817,6 +951,5 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
     </Card>
   );
 };
-
 
 export default ChallengeEdit;
