@@ -2,16 +2,15 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Shield, LogIn, Loader, Mail, AlertCircle } from "lucide-react";
 import { 
-  signInWithEmailAndPassword, 
   signInWithRedirect, 
   GithubAuthProvider, 
-  sendPasswordResetEmail,
   getRedirectResult,
-  linkWithCredential,
-  fetchSignInMethodsForEmail
+  fetchSignInMethodsForEmail,
+  linkWithCredential
 } from "firebase/auth";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import { useAuth } from "../contexts/AuthContext";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 
@@ -37,6 +36,7 @@ const Login = () => {
   });
 
   const navigate = useNavigate();
+  const { login, loginWithGithub, resetPassword } = useAuth();
   const githubProvider = new GithubAuthProvider();
 
   githubProvider.addScope('read:user');
@@ -74,8 +74,13 @@ const Login = () => {
             return;
           }
           
-          // Proceed with normal login or account creation
-          await handleUserLoginOrCreation(user, isNewUser);
+          // Use AuthContext loginWithGithub which creates Firestore document
+          const authResult = await loginWithGithub();
+          if (authResult.success) {
+            navigate("/dashboard");
+          } else {
+            setError(authResult.error || "GitHub login failed");
+          }
         }
       } catch (error: any) {
         console.error("OAuth redirect error:", error);
@@ -83,7 +88,6 @@ const Login = () => {
         // CORRECT HANDLING for account exists with different credential
         if (error.code === 'auth/account-exists-with-different-credential') {
           const email = error.customData?.email;
-          // The credential that was used
           const pendingCred = error.credential;
           
           if (email) {
@@ -99,7 +103,7 @@ const Login = () => {
               });
               setShowLinkAccountModal(true);
             } else {
-              // Other OAuth provider exists - use plain string
+              // Other OAuth provider exists
               setError(`An account already exists with ${email} using a different authentication method. Please sign in with your existing method first.`);
             }
           }
@@ -112,7 +116,7 @@ const Login = () => {
     };
 
     handleOAuthRedirect();
-  }, [navigate]);
+  }, [navigate, loginWithGithub]);
 
   // Handle account linking when user provides password
   const handleAccountLinking = async (e: React.FormEvent) => {
@@ -126,26 +130,23 @@ const Login = () => {
     setError("");
 
     try {
-      // First, sign in with email/password
-      const userCredential = await signInWithEmailAndPassword(
-        auth, 
-        linkAccountData.email, 
-        linkAccountData.password
-      );
+      // First, sign in with email/password using AuthContext
+      const loginResult = await login(linkAccountData.email, linkAccountData.password);
+      
+      if (!loginResult.success) {
+        setError(loginResult.error || "Failed to sign in");
+        return;
+      }
       
       // Then link the GitHub credential
       if (linkAccountData.githubCredential) {
-        await linkWithCredential(userCredential.user, linkAccountData.githubCredential);
+        await linkWithCredential(auth.currentUser!, linkAccountData.githubCredential);
         console.log("Accounts linked successfully");
       }
       
-      // Update user document
-      await updateUserDocument(userCredential.user);
-      
       // Redirect
-      const redirectPath = await getRedirectPath(userCredential.user.uid);
       setShowLinkAccountModal(false);
-      navigate(redirectPath);
+      navigate("/dashboard");
       
     } catch (error: any) {
       console.error("Account linking error:", error);
@@ -159,71 +160,6 @@ const Login = () => {
     }
   };
 
-  // Handle normal user login or creation
-  const handleUserLoginOrCreation = async (user: any, isNewUser: boolean) => {
-    // Check if user document exists in Firestore
-    const userDoc = await getDoc(doc(db, "users", user.uid));
-    
-    if (!userDoc.exists() || isNewUser) {
-      // Create or update user document in Firestore
-      await setDoc(doc(db, "users", user.uid), {
-        uid: user.uid,
-        firstName: user.displayName?.split(' ')[0] || 'GitHub',
-        lastName: user.displayName?.split(' ').slice(1).join(' ') || 'User',
-        username: user.email?.split('@')[0] || `github_${user.uid.slice(0, 8)}`,
-        email: user.email,
-        displayName: user.displayName || 'GitHub User',
-        photoURL: user.photoURL,
-        provider: 'github',
-        role: 'user',
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        totalPoints: 0,
-        challengesSolved: 0,
-        currentRank: 0,
-        timeSpent: "0h 0m",
-        ...(userDoc.exists() ? userDoc.data() : {}) // Merge existing data if updating
-      }, { merge: true });
-      console.log("User document created/updated");
-    }
-    
-    // Redirect to appropriate page based on user role
-    const redirectPath = await getRedirectPath(user.uid);
-    console.log("Redirecting to:", redirectPath);
-    navigate(redirectPath, { replace: true });
-  };
-
-  // Update user document (common function)
-  const updateUserDocument = async (user: any) => {
-    const userDoc = await getDoc(doc(db, "users", user.uid));
-    await setDoc(doc(db, "users", user.uid), {
-      uid: user.uid,
-      email: user.email,
-      displayName: user.displayName || userDoc.data()?.displayName,
-      photoURL: user.photoURL || userDoc.data()?.photoURL,
-      updatedAt: new Date(),
-      ...userDoc.data() // Merge existing data
-    }, { merge: true });
-  };
-
-  // Function to determine redirect path based on user role
-  const getRedirectPath = async (userId: string) => {
-    try {
-      const userDoc = await getDoc(doc(db, "users", userId));
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        if (userData.role === 'admin' || userData.role === 'moderator') {
-          return "/admin";
-        }
-      }
-      return "/dashboard";
-    } catch (error) {
-      console.error("Error checking user role:", error);
-      return "/dashboard";
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -231,12 +167,15 @@ const Login = () => {
     setIsLoading(true);
 
     try {
-      const result = await signInWithEmailAndPassword(auth, formData.email, formData.password);
-      const redirectPath = await getRedirectPath(result.user.uid);
-      navigate(redirectPath);
+      const result = await login(formData.email, formData.password);
+      if (result.success) {
+        navigate("/dashboard");
+      } else {
+        setError(result.error || "Login failed");
+      }
     } catch (error: any) {
       console.error("Login error:", error);
-      setError(getFirebaseErrorMessage(error.code));
+      setError("Login failed. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -269,13 +208,17 @@ const Login = () => {
     setSuccessMessage("");
 
     try {
-      await sendPasswordResetEmail(auth, resetEmail.trim());
-      setSuccessMessage(`Password reset email sent to ${resetEmail}. Please check your inbox and spam folder.`);
-      setResetEmail("");
-      setTimeout(() => {
-        setShowResetModal(false);
-        setSuccessMessage("");
-      }, 5000);
+      const result = await resetPassword(resetEmail.trim());
+      if (result.success) {
+        setSuccessMessage(`Password reset email sent to ${resetEmail}. Please check your inbox and spam folder.`);
+        setResetEmail("");
+        setTimeout(() => {
+          setShowResetModal(false);
+          setSuccessMessage("");
+        }, 5000);
+      } else {
+        setError(result.error || "Failed to send reset email");
+      }
     } catch (error: any) {
       console.error("Password reset error:", error);
       if (error.code === 'auth/user-not-found') {

@@ -21,11 +21,12 @@ import LiveLeaderboard from './components/LiveLeaderboard';
 import AdminDashboard from './components/AdminDashboard';
 import PracticeChallengeDetail from './components/PracticeChallengeDetail';
 import LiveEventChallengeDetail from './components/LiveEventChallengeDetail';
-import UpcomingChallengePreview from './components/UpcomingChallengePreview'; // Add this import
+import UpcomingChallengePreview from './components/UpcomingChallengePreview';
 import UpcomingEventDetails from './components/UpcomingEventDetails';
 import LiveEventDetails from './components/LiveEventDetails';
 import PastEventDetails from './components/PastEventDetails';
 import Navbar from './components/Navbar';
+import MigrationPage from './pages/MigrationPage'; // Add this import
 
 function App() {
   return (
@@ -41,6 +42,9 @@ function App() {
                   <Route path="/login" element={<Login />} />
                   <Route path="/signup" element={<Signup />} />
                   <Route path="/auth/github/callback" element={<GitHubCallback />} />
+                  
+                  {/* Migration Tool Route - Add this line */}
+                  <Route path="/migrate-users" element={<MigrationPage />} />
                   
                   {/* Public Routes */}
                   <Route path="/leaderboard" element={<Leaderboard />} />

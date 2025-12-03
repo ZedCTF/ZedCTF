@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Shield, UserPlus, Mail, User, Lock, Loader } from "lucide-react";
-import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
-import { auth, db } from "../firebase";
+import { useAuth } from "../contexts/AuthContext"; // UPDATED IMPORT
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 
@@ -23,11 +21,13 @@ const Signup = () => {
   });
 
   const navigate = useNavigate();
+  const { signup } = useAuth(); // UPDATED
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
+    // Validation
     if (formData.password !== formData.confirmPassword) {
       setError("Passwords don't match!");
       return;
@@ -43,61 +43,37 @@ const Signup = () => {
       return;
     }
 
+    if (!formData.username.trim()) {
+      setError("Username is required");
+      return;
+    }
+
+    if (!formData.firstName.trim() || !formData.lastName.trim()) {
+      setError("First name and last name are required");
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      // 1. Create user with email and password in Firebase Auth
-      const userCredential = await createUserWithEmailAndPassword(
-        auth, 
-        formData.email, 
-        formData.password
+      // Use AuthContext signup function
+      const result = await signup(
+        formData.email.trim(),
+        formData.password,
+        `${formData.firstName.trim()} ${formData.lastName.trim()}`,
+        formData.username.trim()
       );
-
-      const user = userCredential.user;
-
-      // 2. Update user profile with display name
-      await updateProfile(user, {
-        displayName: `${formData.firstName} ${formData.lastName}`.trim()
-      });
-
-      // 3. Create user document in Firestore
-      await setDoc(doc(db, "users", user.uid), {
-        uid: user.uid,
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        username: formData.username,
-        email: formData.email,
-        displayName: `${formData.firstName} ${formData.lastName}`.trim(),
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        totalPoints: 0,
-        challengesSolved: 0,
-        currentRank: 0,
-        timeSpent: "0h 0m"
-      });
-
-      navigate("/dashboard");
-
+      
+      if (result.success) {
+        navigate("/dashboard");
+      } else {
+        setError(result.error || "Registration failed. Please try again.");
+      }
     } catch (error: any) {
       console.error("Registration error:", error);
-      setError(getFirebaseErrorMessage(error.code));
+      setError("Registration failed. Please try again.");
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const getFirebaseErrorMessage = (errorCode: string) => {
-    switch (errorCode) {
-      case "auth/email-already-in-use":
-        return "An account with this email already exists.";
-      case "auth/invalid-email":
-        return "Invalid email address format.";
-      case "auth/operation-not-allowed":
-        return "Email/password accounts are not enabled.";
-      case "auth/weak-password":
-        return "Password is too weak.";
-      default:
-        return "Registration failed. Please try again.";
     }
   };
 
@@ -217,6 +193,9 @@ const Signup = () => {
                     disabled={isLoading}
                   />
                 </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  This will be your public username on the platform
+                </p>
               </div>
 
               {/* Password Input */}
@@ -246,6 +225,9 @@ const Signup = () => {
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Must be at least 6 characters long
+                </p>
               </div>
 
               {/* Confirm Password Input */}
@@ -290,11 +272,11 @@ const Signup = () => {
                   />
                   <span className="ml-2 text-sm text-muted-foreground">
                     I agree to the{" "}
-                    <a href="#" className="text-primary hover:text-primary/80 transition-colors">
+                    <a href="/terms" className="text-primary hover:text-primary/80 transition-colors">
                       Terms of Service
                     </a>{" "}
                     and{" "}
-                    <a href="#" className="text-primary hover:text-primary/80 transition-colors">
+                    <a href="/privacy" className="text-primary hover:text-primary/80 transition-colors">
                       Privacy Policy
                     </a>
                   </span>
