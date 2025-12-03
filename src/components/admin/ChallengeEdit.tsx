@@ -1,6 +1,6 @@
 // src/components/admin/ChallengeEdit.tsx
 import { useState, useEffect } from "react";
-import { doc, updateDoc, getDoc } from "firebase/firestore";
+import { doc, updateDoc, getDoc, deleteDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../../firebase";
 import { useAuthContext } from "../../contexts/AuthContext";
@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { X, Plus, Upload, Link, FileText, User, ExternalLink, Save, Star, Shield, Lock, AlertCircle } from "lucide-react";
+import { X, Plus, Upload, Link, FileText, User, ExternalLink, Save, Star, Shield, Lock, AlertCircle, Trash2 } from "lucide-react";
 
 interface ChallengeEditProps {
   challengeId: string;
@@ -64,7 +64,7 @@ interface ChallengeData {
   availableInPractice: boolean;
   challengeType: 'practice' | 'live' | 'past_event';
   externalSource: ExternalSource;
-  createdById?: string; // Add createdById to track ownership
+  createdById: string; // Add createdById to track ownership
 }
 
 const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
@@ -101,7 +101,8 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
       originalAuthor: "",
       authorUrl: "",
       license: "unknown"
-    }
+    },
+    createdById: user?.uid || ""
   });
 
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -109,8 +110,10 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
 
   // Check if current user can edit this challenge
   const canEditChallenge = (): boolean => {
+    if (!user) return false;
     if (isAdmin) return true;
-    if (isModerator && user && challengeOwner === user.uid) return true;
+    if (isModerator) return true;  // Moderators can edit any challenge
+    if (challengeOwner && challengeOwner === user.uid) return true;
     return false;
   };
 
@@ -156,17 +159,20 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
         const challengeData = challengeDoc.data();
         
         // Check permissions
-        const challengeCreatedById = challengeData.createdById;
-        setChallengeOwner(challengeCreatedById);
+        const challengeCreatedById = challengeData.createdById || challengeData.createdBy;
+        setChallengeOwner(challengeCreatedById || "");
         
-        if (!canEditChallenge() && challengeCreatedById !== user?.uid) {
-          setAccessDenied(true);
-          setLoading(false);
-          return;
+        // Check if user can edit
+        if (!canEditChallenge()) {
+          if (challengeCreatedById !== user?.uid) {
+            setAccessDenied(true);
+            setLoading(false);
+            return;
+          }
         }
 
-        // Set form data from challenge
-        setFormData({
+        // Set all fields from the challenge document
+        const newFormData: ChallengeData = {
           title: challengeData.title || "",
           description: challengeData.description || "",
           category: challengeData.category || "web",
@@ -192,8 +198,10 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
             authorUrl: challengeData.attribution?.authorUrl || "",
             license: challengeData.attribution?.license || "unknown"
           },
-          createdById: challengeCreatedById
-        });
+          createdById: challengeCreatedById || user?.uid || ""
+        };
+
+        setFormData(newFormData);
 
         // Set questions if it's a multi-question challenge
         if (challengeData.hasMultipleQuestions && challengeData.questions) {
@@ -230,6 +238,13 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    console.log("=== DEBUG: Challenge Update ===");
+    console.log("Current user:", user?.uid);
+    console.log("Challenge owner:", challengeOwner);
+    console.log("Is admin:", isAdmin);
+    console.log("Is moderator:", isModerator);
+    console.log("Can edit:", canEditChallenge());
+    
     // Double-check permissions before saving
     if (!canEditChallenge()) {
       alert("You do not have permission to edit this challenge");
@@ -239,46 +254,97 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
     setSaving(true);
     
     try {
-      const challengeData = {
-        ...formData,
+      // Build the update data matching the expected structure
+      const updateData: any = {
+        title: formData.title,
+        description: formData.description,
+        category: formData.category,
         finalCategory: showCustomCategory ? formData.customCategory : formData.category,
-        questions: formData.hasMultipleQuestions ? questions : [],
-        hints: formData.hints.filter(hint => hint.trim() !== ""),
-        // Use calculated total points
-        totalPoints: totalPoints,
-        // For multi-question challenges, ensure points field is consistent
+        difficulty: formData.difficulty,
         points: formData.hasMultipleQuestions ? totalPoints : formData.points,
-        updatedAt: new Date(),
-        updatedBy: user?.uid,
-        updatedByName: user?.displayName || user?.email,
-        // Include practice fields
+        totalPoints: totalPoints,
+        flag: formData.flag,
+        flagFormat: formData.flagFormat,
+        hasMultipleQuestions: formData.hasMultipleQuestions,
+        isExternalChallenge: formData.isExternalChallenge,
+        isActive: formData.isActive,
+        hints: formData.hints.filter(hint => hint.trim() !== ""),
+        files: formData.files,
         featuredOnPractice: formData.featuredOnPractice,
         availableInPractice: formData.availableInPractice,
         challengeType: formData.challengeType,
-        ...(formData.isExternalChallenge && {
-          attribution: {
-            ...formData.externalSource,
-            importedBy: user?.displayName || user?.email,
-            importedById: user?.uid,
-            importedAt: new Date()
-          }
-        }),
-        ...(formData.creator && {
-          originalCreator: {
-            name: formData.creator,
-            url: formData.creatorUrl
-          }
-        })
+        updatedAt: new Date(),
+        updatedBy: user?.uid,
+        updatedByName: user?.displayName || user?.email,
+        // CRITICAL: Keep the createdById unchanged
+        createdById: challengeOwner || user?.uid,
       };
 
-      await updateDoc(doc(db, "challenges", challengeId), challengeData);
+      // Add questions if multi-question challenge
+      if (formData.hasMultipleQuestions) {
+        updateData.questions = questions;
+      }
+
+      // Add creator information if provided
+      if (formData.creator) {
+        updateData.originalCreator = {
+          name: formData.creator,
+          url: formData.creatorUrl
+        };
+      }
+
+      // Add external source attribution if it's an external challenge
+      if (formData.isExternalChallenge) {
+        updateData.attribution = {
+          ctfName: formData.externalSource.ctfName,
+          ctfUrl: formData.externalSource.ctfUrl,
+          originalAuthor: formData.externalSource.originalAuthor,
+          authorUrl: formData.externalSource.authorUrl,
+          license: formData.externalSource.license,
+          importedBy: user?.displayName || user?.email,
+          importedById: user?.uid,
+          importedAt: new Date()
+        };
+      }
+
+      console.log("Update data being sent:", updateData);
+      console.log("Fields being updated:", Object.keys(updateData));
+
+      await updateDoc(doc(db, "challenges", challengeId), updateData);
       alert("Challenge updated successfully!");
       onSave();
-    } catch (error) {
-      console.error("Error updating challenge:", error);
-      alert("Error updating challenge. Please try again.");
+    } catch (error: any) {
+      console.error("Full error details:", error);
+      console.error("Error code:", error.code);
+      console.error("Error message:", error.message);
+      alert(`Error updating challenge: ${error.message}. Please try again.`);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm("Are you sure you want to delete this challenge? This action cannot be undone.")) {
+      return;
+    }
+
+    console.log("=== DEBUG: Challenge Delete ===");
+    console.log("Current user:", user?.uid);
+    console.log("Challenge owner:", challengeOwner);
+    console.log("Can edit:", canEditChallenge());
+
+    if (!canEditChallenge()) {
+      alert("You do not have permission to delete this challenge");
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, "challenges", challengeId));
+      alert("Challenge deleted successfully!");
+      onSave(); // Call the save callback to refresh the list
+    } catch (error: any) {
+      console.error("Error deleting challenge:", error);
+      alert(`Error deleting challenge: ${error.message}. Please try again.`);
     }
   };
 
@@ -1029,6 +1095,17 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
             <Button type="button" variant="outline" onClick={onBack}>
               Cancel
             </Button>
+            {(isAdmin || isModerator || challengeOwner === user?.uid) && (
+              <Button 
+                type="button" 
+                variant="destructive" 
+                onClick={handleDelete}
+                disabled={saving}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete Challenge
+              </Button>
+            )}
           </div>
         </form>
       </CardContent>
