@@ -21,6 +21,7 @@ import LiveLeaderboard from './components/LiveLeaderboard';
 import AdminDashboard from './components/AdminDashboard';
 import PracticeChallengeDetail from './components/PracticeChallengeDetail';
 import LiveEventChallengeDetail from './components/LiveEventChallengeDetail';
+import UpcomingChallengePreview from './components/UpcomingChallengePreview'; // Add this import
 import UpcomingEventDetails from './components/UpcomingEventDetails';
 import LiveEventDetails from './components/LiveEventDetails';
 import PastEventDetails from './components/PastEventDetails';
@@ -106,6 +107,16 @@ function App() {
                     element={
                       <ProtectedRoute>
                         <LiveEventChallengeDetail />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  
+                  {/* Upcoming Challenge Preview Route - Accessible to ALL authenticated users (including admins) */}
+                  <Route 
+                    path="/event/upcoming/:eventId/challenge/:challengeId" 
+                    element={
+                      <ProtectedRoute>
+                        <UpcomingChallengePreview />
                       </ProtectedRoute>
                     } 
                   />

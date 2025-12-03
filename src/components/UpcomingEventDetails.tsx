@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { doc, getDoc, collection, getDocs, query, where, orderBy, updateDoc, arrayUnion, increment, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs, query, where, updateDoc, arrayUnion, increment, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuthContext } from "../contexts/AuthContext";
 import { useAdminContext } from "../contexts/AdminContext";
@@ -621,35 +621,37 @@ const UpcomingEventDetails = () => {
     try {
       let challengesData: Challenge[] = [];
 
+      // Query without orderBy to avoid Firestore index requirement
       const challengesQuery = query(
         collection(db, "challenges"),
-        where("eventId", "==", eventId),
-        orderBy("points", "asc")
+        where("eventId", "==", eventId)
       );
+      
       const challengesSnapshot = await getDocs(challengesQuery);
       
       challengesSnapshot.forEach(doc => {
         const data = doc.data();
-        if (isEventOwner || data.isActive) {
-          challengesData.push({
-            id: doc.id,
-            title: data.title,
-            description: isEventOwner ? data.description : "Challenge details will be available when the event starts",
-            category: data.finalCategory || data.category,
-            points: data.points,
-            difficulty: data.difficulty,
-            solvedBy: data.solvedBy,
-            isActive: data.isActive,
-            eventId: data.eventId,
-            challengeType: data.challengeType
-          });
-        }
+        challengesData.push({
+          id: doc.id,
+          title: data.title,
+          description: isEventOwner ? data.description : "Challenge details will be available when the event starts",
+          category: data.finalCategory || data.category,
+          points: data.points,
+          difficulty: data.difficulty,
+          solvedBy: data.solvedBy,
+          isActive: data.isActive,
+          eventId: data.eventId,
+          challengeType: data.challengeType
+        });
       });
+
+      // Sort manually by points
+      challengesData.sort((a, b) => a.points - b.points);
 
       setChallenges(challengesData);
       setChallengesLoaded(true);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching challenges:", error);
       setChallenges([]);
       setChallengesLoaded(true);
@@ -776,9 +778,11 @@ const UpcomingEventDetails = () => {
     navigate("/live");
   };
 
+  // Handle challenge click - ONLY for admins/event owners to preview upcoming challenges
   const handleChallengeClick = (challenge: Challenge) => {
     if (isEventOwner) {
-      navigate(`/challenge/${challenge.id}`);
+      // Navigate to upcoming challenge preview for admins/event owners
+      navigate(`/event/upcoming/${eventId}/challenge/${challenge.id}`);
     } else {
       setMessage({ 
         type: 'error', 
@@ -808,7 +812,8 @@ const UpcomingEventDetails = () => {
       forensics: "bg-orange-500/20 text-orange-600 border-orange-200",
       pwn: "bg-red-500/20 text-red-600 border-red-200",
       reversing: "bg-indigo-500/20 text-indigo-600 border-indigo-200",
-      misc: "bg-gray-500/20 text-gray-600 border-gray-200"
+      misc: "bg-gray-500/20 text-gray-600 border-gray-200",
+      osint: "bg-pink-500/20 text-pink-600 border-pink-200"
     };
     return colors[category.toLowerCase()] || "bg-gray-500/20 text-gray-600 border-gray-200";
   };
@@ -831,9 +836,10 @@ const UpcomingEventDetails = () => {
     return event.currency || 'ZMW';
   };
 
+  // Get challenge access status for UI display - ONLY for admins/event owners
   const getChallengeAccessStatus = (challenge: Challenge) => {
     if (isEventOwner) {
-      return { accessible: true, message: "Admin/Event Owner Access" };
+      return { accessible: true, message: "Admin Preview Access" };
     }
     
     return { accessible: false, message: "Available when event starts" };
@@ -970,7 +976,7 @@ const UpcomingEventDetails = () => {
               {isEventOwner && (
                 <Badge className="bg-purple-500/20 text-purple-600 border-purple-200 text-xs">
                   <Shield className="w-3 h-3 mr-1" />
-                  Event Owner
+                  Event Owner/Admin
                 </Badge>
               )}
               {isEventFull && (
@@ -1150,14 +1156,26 @@ const UpcomingEventDetails = () => {
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Shield className="w-4 h-4" />
                     Upcoming Challenges ({challenges.length})
-                    <Badge variant="outline" className="text-xs">
-                      {isEventOwner ? "Preview Access" : "Available when event starts"}
-                    </Badge>
+                    {isEventOwner ? (
+                      <Badge variant="outline" className="text-xs bg-purple-500/20 text-purple-600 border-purple-300">
+                        Admin Preview Access
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs">
+                        Available when event starts
+                      </Badge>
+                    )}
                   </CardTitle>
                   {!isEventOwner && (
                     <CardDescription className="text-xs flex items-center gap-1">
                       <Lock className="w-3 h-3" />
                       Challenges will unlock automatically when the event starts
+                    </CardDescription>
+                  )}
+                  {isEventOwner && (
+                    <CardDescription className="text-xs flex items-center gap-1 text-purple-600">
+                      <Eye className="w-3 h-3" />
+                      You have admin preview access to view challenge details
                     </CardDescription>
                   )}
                   {!challengesLoaded && (
@@ -1205,6 +1223,12 @@ const UpcomingEventDetails = () => {
                                       <span className="text-xs text-muted-foreground">Locked</span>
                                     </div>
                                   )}
+                                  {access.accessible && (
+                                    <div className="flex items-center gap-1">
+                                      <Eye className="w-3 h-3 text-purple-600" />
+                                      <span className="text-xs text-purple-600">Preview</span>
+                                    </div>
+                                  )}
                                 </div>
                                 <Badge variant="outline" className="font-mono text-xs">
                                   {challenge.points} pts
@@ -1229,15 +1253,18 @@ const UpcomingEventDetails = () => {
                               </p>
                               <div className="flex justify-between items-center mt-2">
                                 <p className={`text-xs ${
-                                  access.accessible ? 'text-green-600' : 'text-orange-600'
+                                  access.accessible ? 'text-purple-600 font-medium' : 'text-orange-600'
                                 }`}>
-                                  {access.message}
+                                  {access.accessible ? 'Click to preview challenge details' : 'Available when event starts'}
                                 </p>
                                 {access.accessible && (
-                                  <Button variant="ghost" size="sm" className="h-6 px-2 text-xs">
+                                  <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-purple-600 hover:text-purple-700">
                                     <Eye className="w-3 h-3 mr-1" />
                                     Preview
                                   </Button>
+                                )}
+                                {!access.accessible && (
+                                  <Lock className="w-3 h-3 text-muted-foreground" />
                                 )}
                               </div>
                             </CardContent>
@@ -1283,7 +1310,8 @@ const UpcomingEventDetails = () => {
                   {isEventOwner && (
                     <div>
                       <h4 className="font-semibold text-xs text-muted-foreground">Your Role</h4>
-                      <p className="text-sm text-purple-600">Event Owner/Admin</p>
+                      <p className="text-sm text-purple-600 font-medium">Event Owner/Admin</p>
+                      <p className="text-xs text-muted-foreground mt-1">You have preview access to challenges</p>
                     </div>
                   )}
                 </CardContent>
