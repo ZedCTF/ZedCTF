@@ -1,6 +1,12 @@
 // src/components/admin/UserManagement.tsx
 import { useState, useEffect } from "react";
-import { collection, getDocs, updateDoc, doc } from "firebase/firestore";
+import { 
+  collection, 
+  getDocs, 
+  updateDoc, 
+  doc, 
+  deleteDoc 
+} from "firebase/firestore";
 import { db } from "../../firebase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,18 +14,30 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { 
-  Search, 
-  Shield, 
-  Users, 
-  CheckCircle, 
-  XCircle, 
-  Crown, 
+import {
+  Search,
+  Shield,
+  Users,
+  CheckCircle,
+  XCircle,
+  Crown,
   GraduationCap,
   User,
   Play,
-  Pause
+  Pause,
+  Trash2,
+  AlertTriangle
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface UserManagementProps {
   onBack: () => void;
@@ -50,6 +68,8 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("all");
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
 
   useEffect(() => {
     fetchUsers();
@@ -200,6 +220,46 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
       console.error("Error message:", error.message);
       setMessage({ type: 'error', text: `Failed to update user status: ${error.message}` });
     }
+  };
+
+  // New function to delete user account
+  const deleteUserAccount = async () => {
+    if (!userToDelete) return;
+
+    try {
+      console.log("🗑️ Deleting user account:", userToDelete.id);
+
+      // Delete from Firestore
+      await deleteDoc(doc(db, "users", userToDelete.id));
+      
+      // Update local state
+      setUsers(users.filter(user => user.id !== userToDelete.id));
+
+      console.log("✅ User account deleted successfully");
+      setMessage({ type: 'success', text: `Account for ${userToDelete.displayName || userToDelete.email} has been deleted` });
+      setTimeout(() => setMessage(null), 3000);
+    } catch (error: any) {
+      console.error("❌ Error deleting user account:", error);
+      setMessage({ type: 'error', text: `Failed to delete account: ${error.message}` });
+    } finally {
+      setDeleteDialogOpen(false);
+      setUserToDelete(null);
+    }
+  };
+
+  // Function to open delete confirmation dialog
+  const confirmDelete = (user: User) => {
+    // Prevent admins from deleting themselves
+    if (user.role === "admin") {
+      setMessage({ 
+        type: 'error', 
+        text: 'You cannot delete an administrator account. Please demote to student first.' 
+      });
+      return;
+    }
+    
+    setUserToDelete(user);
+    setDeleteDialogOpen(true);
   };
 
   const getRoleBadgeVariant = (role: string) => {
@@ -464,6 +524,18 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
                           )}
                         </Button>
                       )}
+                      
+                      {/* Delete button - Hidden for admins */}
+                      {user.role !== "admin" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => confirmDelete(user)}
+                          className="h-9 w-9 p-0 text-red-600 border-red-200 hover:bg-red-50"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -479,6 +551,73 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+              Delete User Account
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3">
+              <p className="font-medium">
+                Are you sure you want to delete this user account?
+              </p>
+              
+              {userToDelete && (
+                <div className="bg-gray-50 p-3 rounded-md">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
+                      {getRoleIcon(userToDelete.role)}
+                    </div>
+                    <div>
+                      <p className="font-medium">{userToDelete.displayName || "No Name"}</p>
+                      <p className="text-xs text-muted-foreground">{userToDelete.email}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Role:</span>
+                      <Badge variant={getRoleBadgeVariant(userToDelete.role)} className="ml-2">
+                        {userToDelete.role}
+                      </Badge>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Status:</span>
+                      <Badge variant={getStatusBadgeVariant(userToDelete)} className="ml-2">
+                        {getStatusText(userToDelete)}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-3">
+                <p className="text-sm text-red-700 font-medium">⚠️ This action cannot be undone.</p>
+                <p className="text-xs text-red-600 mt-1">
+                  All user data will be permanently deleted from the database.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setDeleteDialogOpen(false);
+              setUserToDelete(null);
+            }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteUserAccount}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete Account
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
