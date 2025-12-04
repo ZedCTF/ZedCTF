@@ -132,6 +132,14 @@ const Footer = () => {
                 >
                   Humphery Chileshe
                 </a>
+                <a 
+                  href="https://github.com/kulusia" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="hover:text-primary transition-colors"
+                >
+                  Kulusha Ng'ambi
+                </a>
               </div>
             </div>
           </div>
