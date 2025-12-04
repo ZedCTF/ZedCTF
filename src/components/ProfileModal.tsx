@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from "react";
-import { X, Camera, User, BookOpen, GraduationCap, Award, Users, CheckCircle, Key, Mail } from "lucide-react";
-import { updateProfile, updatePassword, sendPasswordResetEmail } from "firebase/auth";
-import { doc, updateDoc, getDoc } from "firebase/firestore";
+import { X, Camera, User, BookOpen, GraduationCap, Award, Users, CheckCircle, Key, Mail, Trash2, AlertTriangle } from "lucide-react";
+import { updateProfile, updatePassword, sendPasswordResetEmail, deleteUser, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
+import { doc, updateDoc, getDoc, deleteDoc, collection, query, where, getDocs, writeBatch, setDoc } from "firebase/firestore";
 import { auth, db, storage } from "../firebase";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref, uploadBytes, getDownloadURL, deleteObject, listAll } from "firebase/storage";
 import { useAuthContext } from "../contexts/AuthContext";
 
 interface ProfileModalProps {
@@ -18,11 +18,12 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [activeTab, setActiveTab] = useState<'profile' | 'security'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'danger'>('profile');
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [formData, setFormData] = useState({
     displayName: '',
+    username: '',
     bio: '',
     role: 'student' as UserRole,
     institution: ''
@@ -34,14 +35,20 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     confirmPassword: ''
   });
 
+  const [deleteData, setDeleteData] = useState({
+    confirmText: '',
+    confirmPassword: ''
+  });
+
   const [profileImage, setProfileImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [securityMessage, setSecurityMessage] = useState({ type: '', text: '' });
+  const [deleteMessage, setDeleteMessage] = useState({ type: '', text: '' });
+  const [usernameMessage, setUsernameMessage] = useState({ type: '', text: '' });
 
   // Load user data when modal opens
   useEffect(() => {
     if (isOpen && user) {
-      // Fetch current user data from Firestore
       const fetchUserData = async () => {
         try {
           const userDoc = await getDoc(doc(db, "users", user.uid));
@@ -49,6 +56,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
             const userData = userDoc.data();
             setFormData({
               displayName: userData.displayName || user.displayName || '',
+              username: userData.username || '',
               bio: userData.bio || '',
               role: userData.role || 'student',
               institution: userData.institution || ''
@@ -57,6 +65,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
           } else {
             setFormData({
               displayName: user.displayName || '',
+              username: '',
               bio: '',
               role: 'student',
               institution: ''
@@ -80,7 +89,13 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
         newPassword: '',
         confirmPassword: ''
       });
+      setDeleteData({
+        confirmText: '',
+        confirmPassword: ''
+      });
       setSecurityMessage({ type: '', text: '' });
+      setDeleteMessage({ type: '', text: '' });
+      setUsernameMessage({ type: '', text: '' });
       setProfileImage(null);
       setPreviewUrl(user?.photoURL || '');
     }
@@ -93,6 +108,10 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
       ...prev,
       [name]: value
     }));
+    
+    if (name === 'username' && usernameMessage.text) {
+      setUsernameMessage({ type: '', text: '' });
+    }
   };
 
   // Handle security form input changes
@@ -102,9 +121,20 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
       ...prev,
       [name]: value
     }));
-    // Clear messages when user starts typing
     if (securityMessage.text) {
       setSecurityMessage({ type: '', text: '' });
+    }
+  };
+
+  // Handle delete form input changes
+  const handleDeleteChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setDeleteData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    if (deleteMessage.text) {
+      setDeleteMessage({ type: '', text: '' });
     }
   };
 
@@ -112,24 +142,42 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Check if file is an image
       if (!file.type.startsWith('image/')) {
         alert('Please select an image file');
         return;
       }
       
-      // Check file size (max 5MB)
       if (file.size > 5 * 1024 * 1024) {
         alert('Image size should be less than 5MB');
         return;
       }
 
       setProfileImage(file);
-      
-      // Create preview immediately
       const objectUrl = URL.createObjectURL(file);
       setPreviewUrl(objectUrl);
     }
+  };
+
+  // Check if username is available
+  const checkUsernameAvailability = async (username: string): Promise<boolean> => {
+    if (!username || username === formData.username) return true;
+    
+    try {
+      const usernameDoc = await getDoc(doc(db, "usernames", username.toLowerCase()));
+      return !usernameDoc.exists();
+    } catch (error) {
+      console.error("Error checking username:", error);
+      return false;
+    }
+  };
+
+  // Validate username
+  const validateUsername = (username: string): { valid: boolean; message: string } => {
+    if (!username) return { valid: false, message: 'Username is required' };
+    if (username.length < 3) return { valid: false, message: 'Username must be at least 3 characters' };
+    if (username.length > 20) return { valid: false, message: 'Username must be less than 20 characters' };
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) return { valid: false, message: 'Username can only contain letters, numbers, and underscores' };
+    return { valid: true, message: '' };
   };
 
   // Compress image before upload
@@ -140,7 +188,6 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
       const img = new Image();
       
       img.onload = () => {
-        // Calculate new dimensions
         let width = img.width;
         let height = img.height;
         
@@ -152,7 +199,6 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
         canvas.width = width;
         canvas.height = height;
         
-        // Draw and compress
         ctx?.drawImage(img, 0, 0, width, height);
         
         canvas.toBlob(
@@ -179,7 +225,6 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
 
   // Upload image to Firebase Storage
   const uploadImage = async (file: File, userId: string): Promise<string> => {
-    // Compress image first
     const compressedFile = await compressImage(file);
     
     const timestamp = Date.now();
@@ -199,16 +244,35 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
 
     setLoading(true);
     setSaveSuccess(false);
+    setUsernameMessage({ type: '', text: '' });
 
     try {
+      const userDocRef = doc(db, "users", user.uid);
+      const userDoc = await getDoc(userDocRef);
+      const currentUserData = userDoc.exists() ? userDoc.data() : {};
+
+      if (formData.username && formData.username !== currentUserData.username) {
+        const validation = validateUsername(formData.username);
+        if (!validation.valid) {
+          setUsernameMessage({ type: 'error', text: validation.message });
+          setLoading(false);
+          return;
+        }
+
+        const isAvailable = await checkUsernameAvailability(formData.username);
+        if (!isAvailable) {
+          setUsernameMessage({ type: 'error', text: 'Username is already taken' });
+          setLoading(false);
+          return;
+        }
+      }
+
       let photoURL = user.photoURL;
 
-      // Upload new profile image if selected
       if (profileImage) {
         setUploading(true);
         try {
           photoURL = await uploadImage(profileImage, user.uid);
-          console.log("Profile image uploaded successfully");
         } catch (error) {
           console.error("Error uploading image:", error);
           alert("Failed to upload image. Please try again.");
@@ -220,47 +284,99 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
         }
       }
 
-      // Update profile data
       const updatePromises = [];
-
-      // Update Firebase Auth profile
-      if (formData.displayName !== user.displayName || photoURL !== user.photoURL) {
+      const authUpdates: any = {};
+      let needsAuthUpdate = false;
+      
+      if (formData.displayName !== user.displayName) {
+        authUpdates.displayName = formData.displayName;
+        needsAuthUpdate = true;
+      }
+      
+      if (photoURL !== user.photoURL) {
+        authUpdates.photoURL = photoURL;
+        needsAuthUpdate = true;
+      }
+      
+      if (needsAuthUpdate) {
         updatePromises.push(
-          updateProfile(user, {
-            displayName: formData.displayName,
-            photoURL: photoURL
+          updateProfile(user, authUpdates).catch(error => {
+            console.error("Error updating auth profile:", error);
+            return Promise.resolve();
           })
         );
       }
 
-      // Update Firestore user document
-      updatePromises.push(
-        updateDoc(doc(db, "users", user.uid), {
-          displayName: formData.displayName,
-          bio: formData.bio,
-          role: formData.role,
-          institution: formData.institution,
-          photoURL: photoURL,
-          updatedAt: new Date()
-        })
-      );
+      if (formData.username && formData.username !== currentUserData.username) {
+        const usernameLower = formData.username.toLowerCase();
+        const currentUsername = currentUserData.username || '';
+        
+        if (currentUsername && usernameLower !== currentUsername.toLowerCase()) {
+          const oldUsernameDoc = await getDoc(doc(db, "usernames", currentUsername.toLowerCase()));
+          if (oldUsernameDoc.exists()) {
+            updatePromises.push(
+              deleteDoc(doc(db, "usernames", currentUsername.toLowerCase()))
+            );
+          }
+        }
+        
+        const usernameRef = doc(db, "usernames", usernameLower);
+        updatePromises.push(
+          setDoc(usernameRef, {
+            userId: user.uid,
+            createdAt: new Date()
+          }, { merge: true })
+        );
+      }
 
-      // Wait for all updates to complete
+      const firestoreUpdates: any = {
+        uid: user.uid,
+        displayName: formData.displayName,
+        bio: formData.bio,
+        institution: formData.institution,
+        updatedAt: new Date()
+      };
+      
+      if (formData.username) {
+        firestoreUpdates.username = formData.username;
+      }
+      
+      if (photoURL) {
+        firestoreUpdates.photoURL = photoURL;
+      }
+      
+      if (currentUserData.role) {
+        firestoreUpdates.role = currentUserData.role;
+      }
+      
+      if (currentUserData.email) {
+        firestoreUpdates.email = currentUserData.email;
+      } else if (user.email) {
+        firestoreUpdates.email = user.email;
+      }
+
+      updatePromises.push(updateDoc(userDocRef, firestoreUpdates));
+
       await Promise.all(updatePromises);
 
       console.log("Profile updated successfully");
       setSaveSuccess(true);
       
-      // Close modal after short delay to show success
       setTimeout(() => {
         onClose();
-        // Refresh the page to show updated profile
         window.location.reload();
       }, 1500);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating profile:", error);
-      alert("Failed to update profile. Please try again.");
+      
+      if (error.code === 'permission-denied') {
+        alert("Permission denied. Please check that your profile data follows the required format.");
+      } else if (error.code === 'auth/requires-recent-login') {
+        alert("For security, please sign out and sign back in before updating your profile.");
+      } else {
+        alert(`Failed to update profile: ${error.message || 'Unknown error'}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -275,7 +391,6 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     setSecurityMessage({ type: '', text: '' });
 
     try {
-      // Validate passwords
       if (securityData.newPassword !== securityData.confirmPassword) {
         setSecurityMessage({ type: 'error', text: 'New passwords do not match' });
         setLoading(false);
@@ -288,7 +403,6 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
         return;
       }
 
-      // Update password
       await updatePassword(user, securityData.newPassword);
       
       setSecurityMessage({ 
@@ -296,7 +410,6 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
         text: 'Password updated successfully!' 
       });
       
-      // Reset form
       setSecurityData({
         currentPassword: '',
         newPassword: '',
@@ -341,6 +454,202 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
         type: 'error', 
         text: error.message || 'Failed to send reset email. Please try again.' 
       });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // COMPLETE ACCOUNT DELETION - WIPES EVERYTHING
+  const handleDeleteAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !user.email) return;
+
+    setLoading(true);
+    setDeleteMessage({ type: '', text: '' });
+
+    try {
+      if (deleteData.confirmText !== 'DELETE MY ACCOUNT') {
+        setDeleteMessage({ 
+          type: 'error', 
+          text: 'Please type "DELETE MY ACCOUNT" to confirm deletion.' 
+        });
+        setLoading(false);
+        return;
+      }
+
+      if (!window.confirm('⚠️ NUCLEAR OPTION ACTIVATED!\n\nThis will delete EVERYTHING:\n• Your account\n• All your data\n• All your submissions\n• Everything you created\n\nThis is PERMANENT and CANNOT BE UNDONE!\n\nAre you ABSOLUTELY sure?')) {
+        setLoading(false);
+        return;
+      }
+
+      if (deleteData.confirmPassword) {
+        const credential = EmailAuthProvider.credential(user.email, deleteData.confirmPassword);
+        await reauthenticateWithCredential(user, credential);
+      }
+
+      console.log("Starting complete account deletion for user:", user.uid);
+
+      const collections = [
+        'users',
+        'usernames',
+        'submissions',
+        'challenges',
+        'events',
+        'payments',
+        'writeups',
+        'hostRequests',
+        'leaderboard',
+        'practice',
+        'scores',
+        'teams',
+        'notifications',
+        'settings',
+        'stats',
+        'logs',
+        'achievements',
+        'badges',
+        'comments',
+        'reports',
+        'config',
+        'messages',
+        'announcements',
+        'sponsors',
+        'faq',
+        'tutorials',
+        'resources',
+        'categories',
+        'flags'
+      ];
+
+      const BATCH_SIZE = 50;
+      let totalDeleted = 0;
+
+      for (const collectionName of collections) {
+        console.log(`Processing collection: ${collectionName}`);
+        
+        try {
+          const collectionRef = collection(db, collectionName);
+          const snapshot = await getDocs(collectionRef);
+          
+          const userDocs = snapshot.docs.filter(doc => {
+            const data = doc.data();
+            return data.userId === user.uid || 
+                   data.uid === user.uid ||
+                   data.authorId === user.uid ||
+                   data.createdById === user.uid ||
+                   data.reporterId === user.uid ||
+                   data.senderId === user.uid ||
+                   data.receiverId === user.uid ||
+                   data.ownerId === user.uid ||
+                   (data.participants && data.participants.includes(user.uid)) ||
+                   (data.members && data.members.includes(user.uid)) ||
+                   (data.solvedBy && data.solvedBy.includes(user.uid)) ||
+                   (data.pendingApprovals && data.pendingApprovals.includes(user.uid));
+          });
+
+          for (let i = 0; i < userDocs.length; i += BATCH_SIZE) {
+            const batch = writeBatch(db);
+            const batchDocs = userDocs.slice(i, i + BATCH_SIZE);
+            
+            batchDocs.forEach(doc => {
+              batch.delete(doc.ref);
+            });
+            
+            if (batchDocs.length > 0) {
+              await batch.commit();
+              totalDeleted += batchDocs.length;
+              console.log(`Deleted ${batchDocs.length} documents from ${collectionName}`);
+            }
+          }
+
+          if (collectionName === 'usernames') {
+            const allUsernames = await getDocs(collectionRef);
+            const usernameBatch = writeBatch(db);
+            let usernameCount = 0;
+            
+            allUsernames.docs.forEach(doc => {
+              if (doc.data().userId === user.uid) {
+                usernameBatch.delete(doc.ref);
+                usernameCount++;
+              }
+            });
+            
+            if (usernameCount > 0) {
+              await usernameBatch.commit();
+              totalDeleted += usernameCount;
+              console.log(`Deleted ${usernameCount} username references`);
+            }
+          }
+
+        } catch (collectionError) {
+          console.warn(`Error processing ${collectionName}:`, collectionError);
+        }
+      }
+
+      console.log(`Total documents deleted: ${totalDeleted}`);
+
+      try {
+        const profilePicsRef = ref(storage, `profile-pictures/${user.uid}`);
+        try {
+          const profilePicsList = await listAll(profilePicsRef);
+          const deletePromises = profilePicsList.items.map(item => deleteObject(item));
+          await Promise.all(deletePromises);
+          
+          if (profilePicsList.items.length > 0) {
+            console.log(`Deleted ${profilePicsList.items.length} profile pictures`);
+          }
+        } catch (listError) {
+          console.log('No profile pictures folder found');
+        }
+
+        const userUploadsRef = ref(storage, `uploads/${user.uid}`);
+        try {
+          const uploadsList = await listAll(userUploadsRef);
+          const uploadDeletePromises = uploadsList.items.map(item => deleteObject(item));
+          await Promise.all(uploadDeletePromises);
+          
+          if (uploadsList.items.length > 0) {
+            console.log(`Deleted ${uploadsList.items.length} uploaded files`);
+          }
+        } catch (uploadsError) {
+          // No uploads folder - that's fine
+        }
+
+      } catch (storageError) {
+        console.warn('Storage deletion error:', storageError);
+      }
+
+      console.log("Deleting user from Firebase Auth...");
+      await deleteUser(user);
+
+      setDeleteMessage({ 
+        type: 'success', 
+        text: `✅ Account COMPLETELY DELETED!\n\nRemoved ${totalDeleted} documents and all your files.\n\nYou will be redirected to the home page.` 
+      });
+
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 3000);
+
+    } catch (error: any) {
+      console.error("Error deleting account:", error);
+      
+      if (error.code === 'auth/requires-recent-login') {
+        setDeleteMessage({ 
+          type: 'error', 
+          text: 'Security check failed. Please sign out and sign back in, then try again.' 
+        });
+      } else if (error.code === 'auth/wrong-password') {
+        setDeleteMessage({ 
+          type: 'error', 
+          text: 'Incorrect password. Please enter your current password to confirm deletion.' 
+        });
+      } else {
+        setDeleteMessage({ 
+          type: 'error', 
+          text: `Deletion failed: ${error.message || 'Unknown error'}\n\nSome data may still exist. Please contact support.` 
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -395,13 +704,24 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
               <Key className="w-4 h-4 inline mr-2" />
               Security
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('danger')}
+              className={`flex-1 py-2 px-3 text-sm font-medium rounded-md transition-colors ${
+                activeTab === 'danger'
+                  ? 'bg-red-500 text-white'
+                  : 'text-red-500 hover:bg-red-50'
+              }`}
+            >
+              <Trash2 className="w-4 h-4 inline mr-2" />
+              Danger Zone
+            </button>
           </div>
         </div>
 
         {/* Profile Tab */}
         {activeTab === 'profile' && (
           <form onSubmit={handleProfileSubmit} className="p-6 space-y-6">
-            {/* Success Message */}
             {saveSuccess && (
               <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded flex items-center gap-2">
                 <CheckCircle className="w-5 h-5" />
@@ -464,6 +784,33 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                 placeholder="Enter your display name"
                 disabled={loading}
               />
+            </div>
+
+            {/* Username */}
+            <div>
+              <label htmlFor="username" className="block text-sm font-medium text-foreground mb-2">
+                Username
+              </label>
+              <input
+                id="username"
+                name="username"
+                type="text"
+                value={formData.username}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                placeholder="Enter unique username (3-20 characters)"
+                disabled={loading}
+              />
+              {usernameMessage.text && (
+                <p className={`mt-2 text-sm ${
+                  usernameMessage.type === 'error' ? 'text-red-600' : 'text-green-600'
+                }`}>
+                  {usernameMessage.text}
+                </p>
+              )}
+              <p className="mt-1 text-xs text-muted-foreground">
+                Username can contain letters, numbers, and underscores. Must be unique.
+              </p>
             </div>
 
             {/* Bio */}
@@ -567,7 +914,6 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
         {/* Security Tab */}
         {activeTab === 'security' && (
           <div className="p-6 space-y-6">
-            {/* Security Message */}
             {securityMessage.text && (
               <div className={`px-4 py-3 rounded flex items-center gap-2 ${
                 securityMessage.type === 'success' 
@@ -666,6 +1012,120 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                 className="w-full px-4 py-2 border border-border text-foreground rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Danger Zone Tab - NUCLEAR DELETE OPTION */}
+        {activeTab === 'danger' && (
+          <div className="p-6 space-y-6">
+            {/* Nuclear Warning */}
+            <div className="bg-red-900 border-2 border-red-600 text-white px-4 py-4 rounded-lg">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-6 h-6 mt-0.5 flex-shrink-0 text-red-300" />
+                <div>
+                  <h4 className="font-bold text-lg mb-2">☢️ NUCLEAR DELETE OPTION</h4>
+                  <p className="text-sm mb-3">
+                    This will <span className="font-bold text-yellow-300">COMPLETELY WIPE</span> all traces of your account from the system.
+                  </p>
+                  <div className="bg-red-950 p-3 rounded border border-red-700">
+                    <p className="text-sm font-semibold mb-2">🚨 WHAT WILL BE DELETED:</p>
+                    <ul className="text-xs space-y-1 ml-4 list-disc text-red-200">
+                      <li>Your user account (Firebase Auth)</li>
+                      <li>All documents in ALL collections that reference you</li>
+                      <li>Every challenge submission you ever made</li>
+                      <li>All scores, achievements, and badges</li>
+                      <li>Comments, writeups, messages, reports</li>
+                      <li>Team memberships (teams you own will be deleted)</li>
+                      <li>Event registrations and participations</li>
+                      <li>Your username reservation</li>
+                      <li>ALL uploaded files and profile pictures</li>
+                      <li>Any other data with your user ID</li>
+                    </ul>
+                  </div>
+                  <p className="text-sm font-bold mt-3 text-center text-yellow-300">
+                    ⚠️ THIS IS PERMANENT AND CANNOT BE UNDONE! ⚠️
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Delete Message */}
+            {deleteMessage.text && (
+              <div className={`px-4 py-3 rounded-lg ${
+                deleteMessage.type === 'success' 
+                  ? 'bg-green-900 border border-green-600 text-green-100'
+                  : 'bg-red-900 border border-red-600 text-red-100'
+              }`}>
+                <pre className="whitespace-pre-wrap text-sm">{deleteMessage.text}</pre>
+              </div>
+            )}
+
+            {/* Nuclear Delete Form */}
+            <form onSubmit={handleDeleteAccount} className="space-y-4">
+              <div className="space-y-3">
+                <div>
+                  <label htmlFor="confirmText" className="block text-sm font-medium text-red-300 mb-2">
+                    Type <span className="font-mono bg-red-950 px-2 py-1 rounded">DELETE MY ACCOUNT</span> to confirm
+                  </label>
+                  <input
+                    id="confirmText"
+                    name="confirmText"
+                    type="text"
+                    value={deleteData.confirmText}
+                    onChange={handleDeleteChange}
+                    className="w-full px-3 py-2 bg-gray-900 border-2 border-red-700 rounded-lg text-white placeholder-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all"
+                    placeholder="DELETE MY ACCOUNT"
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="confirmPassword" className="block text-sm font-medium text-red-300 mb-2">
+                    Enter your current password for security verification
+                  </label>
+                  <input
+                    id="confirmPassword"
+                    name="confirmPassword"
+                    type="password"
+                    value={deleteData.confirmPassword}
+                    onChange={handleDeleteChange}
+                    className="w-full px-3 py-2 bg-gray-900 border-2 border-red-700 rounded-lg text-white placeholder-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all"
+                    placeholder="Your current password"
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading || deleteData.confirmText !== 'DELETE MY ACCOUNT'}
+                className="w-full px-4 py-3 bg-gradient-to-r from-red-700 to-red-900 text-white rounded-lg hover:from-red-800 hover:to-red-950 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 border border-red-600 shadow-lg shadow-red-900/30"
+              >
+                {loading ? (
+                  <>
+                    <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
+                    <span className="font-semibold">DESTROYING ALL DATA...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-5 h-5" />
+                    <span className="font-bold">ACTIVATE NUCLEAR DELETE</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            {/* Back Button */}
+            <div className="pt-4">
+              <button
+                type="button"
+                onClick={() => setActiveTab('profile')}
+                disabled={loading}
+                className="w-full px-4 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50"
+              >
+                ← Back to Safety
               </button>
             </div>
           </div>
