@@ -12,7 +12,8 @@ import {
   Plus,
   Settings,
   List,
-  Edit3
+  Edit3,
+  RefreshCw
 } from "lucide-react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
@@ -31,6 +32,7 @@ import WriteupReview from "./admin/WriteupReview";
 import PlatformAnalytics from "./admin/PlatformAnalytics";
 import SystemSettings from "./admin/SystemSettings";
 import AddChallenges from "./admin/AddChallenges";
+import LeaderboardRecalc from "./admin/LeaderboardRecalc"; // NEW IMPORT
 
 interface Stats {
   totalUsers: number;
@@ -247,6 +249,8 @@ const AdminDashboard = () => {
         return isAdmin ? <PlatformAnalytics onBack={() => setActiveView("overview")} /> : renderAccessDenied();
       case "settings":
         return isAdmin ? <SystemSettings onBack={() => setActiveView("overview")} /> : renderAccessDenied();
+      case "leaderboard-recalc": // NEW CASE
+        return isAdmin ? <LeaderboardRecalc onBack={() => setActiveView("overview")} /> : renderAccessDenied();
       default:
         return renderOverview();
     }
@@ -390,6 +394,16 @@ const AdminDashboard = () => {
               <Button 
                 variant="outline" 
                 className="w-full justify-start gap-2"
+                onClick={() => setActiveView("leaderboard-recalc")}
+              >
+                <RefreshCw className="w-4 h-4" />
+                Recalculate Leaderboard
+              </Button>
+            )}
+            {isAdmin && (
+              <Button 
+                variant="outline" 
+                className="w-full justify-start gap-2"
                 onClick={() => setActiveView("analytics")}
               >
                 <BarChart3 className="w-4 h-4" />
@@ -439,7 +453,9 @@ const AdminDashboard = () => {
                    activeView === "schedule-event" ? "Schedule Event" :
                    activeView === "review-writeups" ? "Review Write-ups" :
                    activeView === "analytics" ? "Platform Analytics" :
-                   activeView === "settings" ? "System Settings" : "Admin Dashboard"}
+                   activeView === "settings" ? "System Settings" :
+                   activeView === "leaderboard-recalc" ? "Leaderboard Recalculation" : // NEW TITLE
+                   "Admin Dashboard"}
                 </h1>
                 <p className="text-muted-foreground">
                   {activeView === "overview" 
@@ -450,6 +466,8 @@ const AdminDashboard = () => {
                     ? "Create new challenges or add existing ones to your events"
                     : activeView === "add-challenges"
                     ? "Add challenges to your event"
+                    : activeView === "leaderboard-recalc"
+                    ? "Fix missing points and update leaderboard rankings" // NEW DESCRIPTION
                     : isAdmin ? "Admin management panel" : "Moderator management panel"
                   }
                 </p>
@@ -483,9 +501,7 @@ const AdminDashboard = () => {
             </div>
             
             <div className="flex items-center gap-2 mt-2">
-              <div className={`px-2 py-1 rounded text-xs font-medium ${
-                isAdmin ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
-              }`}>
+              <div className={`px-2 py-1 rounded text-xs font-medium ${isAdmin ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
                 {isAdmin ? 'Administrator' : 'Moderator'}
               </div>
             </div>

@@ -21,7 +21,11 @@ import {
   collection,
   query,
   where,
-  getDocs
+  getDocs,
+  writeBatch,
+  arrayUnion,
+  increment,
+  addDoc
 } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 
@@ -36,7 +40,13 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   updateUserProfile: (data: { displayName?: string; photoURL?: string }) => Promise<void>;
   createMissingUserDocuments: () => Promise<void>;
-  updateUserActivity: () => Promise<void>; // ADDED
+  updateUserActivity: () => Promise<void>;
+  submitFlag: (challengeId: string, flag: string, challengeTitle: string, points: number) => Promise<{
+    success: boolean;
+    isCorrect: boolean;
+    message: string;
+    pointsAwarded: number;
+  }>; // NEW: Add flag submission function
 }
 
 const AuthContext = createContext<AuthContextType>({ 
@@ -50,7 +60,8 @@ const AuthContext = createContext<AuthContextType>({
   resetPassword: async () => ({ success: false, error: 'Not implemented' }),
   updateUserProfile: async () => {},
   createMissingUserDocuments: async () => {},
-  updateUserActivity: async () => {} // ADDED
+  updateUserActivity: async () => {},
+  submitFlag: async () => ({ success: false, isCorrect: false, message: 'Not implemented', pointsAwarded: 0 }) // NEW
 });
 
 // Function to check if username is available
@@ -149,6 +160,126 @@ const createUserDocument = async (user: User, customUsername?: string, displayNa
   });
   
   return userRef;
+};
+
+// NEW: Function to check if flag is correct and update everything
+const checkFlagAndUpdate = async (userId: string, challengeId: string, submittedFlag: string, challengeTitle: string, points: number) => {
+  try {
+    // 1. Get the challenge to check the flag
+    const challengeRef = doc(db, "challenges", challengeId);
+    const challengeSnap = await getDoc(challengeRef);
+    
+    if (!challengeSnap.exists()) {
+      throw new Error("Challenge not found");
+    }
+    
+    const challenge = challengeSnap.data();
+    const correctFlag = challenge.flag;
+    const solvedBy = challenge.solvedBy || [];
+    
+    // 2. Check if user has already solved this challenge
+    if (solvedBy.includes(userId)) {
+      throw new Error("You have already solved this challenge!");
+    }
+    
+    // 3. Check if the flag is correct (case-insensitive)
+    const isCorrect = submittedFlag.trim().toLowerCase() === correctFlag.toLowerCase();
+    
+    // 4. Create a batch for atomic operations
+    const batch = writeBatch(db);
+    
+    // 5. Create submission document
+    const submissionRef = doc(collection(db, "submissions"));
+    const submissionData = {
+      challengeId,
+      challengeTitle,
+      flag: submittedFlag,
+      isCorrect,
+      points,
+      pointsAwarded: isCorrect ? points : 0,
+      submittedAt: serverTimestamp(),
+      userId,
+      userName: "", // Will be filled from user document
+      username: ""  // Will be filled from user document
+    };
+    
+    // Get user info for submission
+    const userRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userRef);
+    
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      submissionData.userName = userData.displayName || "Anonymous";
+      submissionData.username = userData.username || "anonymous";
+    }
+    
+    batch.set(submissionRef, submissionData);
+    
+    if (isCorrect) {
+      // 6. Update challenge - add user to solvedBy
+      batch.update(challengeRef, {
+        solvedBy: arrayUnion(userId),
+        lastSolvedAt: serverTimestamp()
+      });
+      
+      // 7. Update user document
+      batch.update(userRef, {
+        totalPoints: increment(points),
+        challengesSolved: increment(1),
+        lastActive: serverTimestamp()
+      });
+      
+      // 8. Update leaderboard
+      const leaderboardRef = doc(db, "leaderboard", userId);
+      const leaderboardSnap = await getDoc(leaderboardRef);
+      
+      if (leaderboardSnap.exists()) {
+        batch.update(leaderboardRef, {
+          totalPoints: increment(points),
+          challengesSolved: increment(1),
+          lastUpdated: serverTimestamp(),
+          lastActive: serverTimestamp()
+        });
+      } else {
+        // Create leaderboard entry if it doesn't exist
+        const userData = userSnap.data();
+        batch.set(leaderboardRef, {
+          userId,
+          username: userData?.username || "anonymous",
+          displayName: userData?.displayName || "Anonymous",
+          totalPoints: points,
+          challengesSolved: 1,
+          rank: 999,
+          lastUpdated: serverTimestamp(),
+          avatar: userData?.photoURL || null,
+          country: userData?.country || null,
+          institution: userData?.institution || null,
+          lastActive: serverTimestamp()
+        });
+      }
+    }
+    
+    // 9. Commit the batch
+    await batch.commit();
+    
+    return {
+      success: true,
+      isCorrect,
+      message: isCorrect 
+        ? `Correct! You earned ${points} points!` 
+        : "Incorrect flag. Try again!",
+      pointsAwarded: isCorrect ? points : 0
+    };
+    
+  } catch (error: any) {
+    console.error("Error checking flag:", error);
+    return {
+      success: false,
+      isCorrect: false,
+      message: error.message || "Failed to submit flag",
+      pointsAwarded: 0
+    };
+  }
 };
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -361,6 +492,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  // NEW: Function to submit flag and update everything
+  const submitFlag = async (challengeId: string, flag: string, challengeTitle: string, points: number) => {
+    if (!user) {
+      return {
+        success: false,
+        isCorrect: false,
+        message: "You must be logged in to submit flags",
+        pointsAwarded: 0
+      };
+    }
+    
+    try {
+      const result = await checkFlagAndUpdate(user.uid, challengeId, flag, challengeTitle, points);
+      return result;
+    } catch (error: any) {
+      console.error("Error submitting flag:", error);
+      return {
+        success: false,
+        isCorrect: false,
+        message: error.message || "Failed to submit flag",
+        pointsAwarded: 0
+      };
+    }
+  };
+
   // Function to create missing user documents for existing users
   const createMissingUserDocuments = async () => {
     try {
@@ -506,7 +662,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       resetPassword,
       updateUserProfile,
       createMissingUserDocuments,
-      updateUserActivity // ADDED
+      updateUserActivity,
+      submitFlag // NEW: Add submitFlag function
     }}>
       {children}
     </AuthContext.Provider>

@@ -1,9 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Trophy, Users, AlertCircle, Clock, ArrowLeft, Globe } from "lucide-react";
+import { Trophy, Users, AlertCircle, Clock, ArrowLeft, Globe, RefreshCw } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useEffect, useState } from "react";
 import { db } from "../firebase";
-import { collection, query, orderBy, limit, getDocs } from "firebase/firestore";
+import { collection, query, orderBy, limit, onSnapshot, getDocs } from "firebase/firestore";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -28,6 +28,40 @@ const GlobalLeaderboard = () => {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [error, setError] = useState<string>("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [unsubscribe, setUnsubscribe] = useState<(() => void) | null>(null);
+
+  // Calculate ranks with tie handling
+  const calculateRanks = (usersData: TopUser[]): TopUser[] => {
+    if (usersData.length === 0) return [];
+    
+    // Sort by points descending
+    const sortedUsers = [...usersData].sort((a, b) => b.points - a.points);
+    
+    let rankCounter = 1;
+    let previousPoints: number | null = null;
+    let sameRankCount = 0;
+    
+    return sortedUsers.map((user, index) => {
+      const userPoints = user.points || 0;
+      
+      // Calculate rank with tie handling
+      let currentRank = rankCounter;
+      if (previousPoints === userPoints) {
+        sameRankCount++;
+      } else {
+        rankCounter += sameRankCount + 1;
+        sameRankCount = 0;
+        currentRank = rankCounter;
+      }
+      previousPoints = userPoints;
+      
+      return {
+        ...user,
+        rank: currentRank
+      };
+    });
+  };
 
   // Fetch top users from Firestore based on totalPoints
   const fetchLeaderboardData = async () => {
@@ -35,52 +69,165 @@ const GlobalLeaderboard = () => {
       console.log("Fetching global leaderboard data from Firestore...");
       setError("");
       
-      let usersData: TopUser[] = [];
+      const usersQuery = query(
+        collection(db, "users"),
+        orderBy("totalPoints", "desc"),
+        limit(100)
+      );
 
-      // Fetch Global Leaderboard (Users) - ALL USERS with points
+      // Try to set up real-time listener first
       try {
-        const usersQuery = query(
-          collection(db, "users"),
-          orderBy("totalPoints", "desc"),
-          limit(100)
+        const unsubscribeListener = onSnapshot(usersQuery, 
+          (snapshot) => {
+            console.log("Real-time update received for leaderboard");
+            
+            if (snapshot.empty) {
+              console.log("No users found in database");
+              setTopUsers([]);
+              setLastUpdated(new Date().toLocaleTimeString());
+              return;
+            }
+
+            const usersData: TopUser[] = [];
+            
+            snapshot.forEach((doc) => {
+              const userData = doc.data();
+              const userPoints = userData.totalPoints || 0;
+              
+              usersData.push({
+                rank: 0, // Will be calculated by calculateRanks
+                name: userData.displayName || 
+                      userData.username || 
+                      userData.email?.split('@')[0] || 
+                      'Anonymous',
+                email: userData.email || '',
+                points: userPoints,
+                userId: doc.id,
+                photoURL: userData.photoURL,
+                role: userData.role,
+                institution: userData.institution
+              });
+            });
+
+            const rankedUsers = calculateRanks(usersData);
+            console.log(`Real-time update: ${rankedUsers.length} users ranked`);
+            
+            setTopUsers(rankedUsers);
+            setLastUpdated(new Date().toLocaleTimeString());
+            setLoading(false);
+            setIsRefreshing(false);
+          },
+          (error) => {
+            console.error("Real-time listener error:", error);
+            
+            // Provide specific error messages
+            if (error.code === 'permission-denied') {
+              setError("Permission denied. Please ensure Firestore rules allow public reading of users collection.");
+            } else if (error.code === 'failed-precondition') {
+              setError("Firestore index required. Please create a composite index for 'users/totalPoints' in Firebase Console.");
+            } else {
+              setError(`Unable to set up real-time updates: ${error.message || 'Unknown error'}`);
+            }
+            
+            // Fall back to one-time fetch if real-time fails
+            console.log("Falling back to one-time fetch due to listener error");
+            handleOneTimeFetch();
+          }
         );
-
-        const usersSnapshot = await getDocs(usersQuery);
-        let rankCounter = 1;
         
-        for (const doc of usersSnapshot.docs) {
-          const userData = doc.data();
-          
-          // Include users with any points (including 0)
-          usersData.push({
-            rank: rankCounter,
-            name: userData.displayName || userData.username || userData.email?.split('@')[0] || 'Anonymous',
-            email: userData.email || '',
-            points: userData.totalPoints || 0,
-            userId: doc.id,
-            photoURL: userData.photoURL,
-            role: userData.role,
-            institution: userData.institution
-          });
-          rankCounter++;
-        }
-
-        console.log(`Found ${usersData.length} users for global leaderboard`, usersData);
-      } catch (queryError) {
-        console.log("Global leaderboard query failed:", queryError);
-        setError("Unable to load leaderboard data. Please check Firestore rules.");
+        setUnsubscribe(() => unsubscribeListener);
+        return;
+        
+      } catch (listenerError: any) {
+        console.error("Failed to set up real-time listener:", listenerError);
+        handleOneTimeFetch();
       }
 
-      setTopUsers(usersData);
-      setLastUpdated(new Date().toLocaleTimeString());
+    } catch (error: any) {
+      console.error("Unexpected error fetching leaderboard data:", error);
+      setError(`Failed to load leaderboard data: ${error.message || 'Please try again later.'}`);
+      setTopUsers([]);
+      setLoading(false);
+      setIsRefreshing(false);
+    }
+  };
 
-    } catch (error) {
-      console.error("Error fetching leaderboard data:", error);
-      setError("Failed to load leaderboard data. Please try again later.");
+  // Fallback one-time fetch
+  const handleOneTimeFetch = async () => {
+    try {
+      const usersQuery = query(
+        collection(db, "users"),
+        orderBy("totalPoints", "desc"),
+        limit(100)
+      );
+
+      const usersSnapshot = await getDocs(usersQuery);
+      
+      if (usersSnapshot.empty) {
+        console.log("No users found in database");
+        setTopUsers([]);
+        setLastUpdated(new Date().toLocaleTimeString());
+        setLoading(false);
+        setIsRefreshing(false);
+        return;
+      }
+
+      const usersData: TopUser[] = [];
+      
+      usersSnapshot.forEach((doc) => {
+        const userData = doc.data();
+        const userPoints = userData.totalPoints || 0;
+        
+        usersData.push({
+          rank: 0, // Will be calculated by calculateRanks
+          name: userData.displayName || 
+                userData.username || 
+                userData.email?.split('@')[0] || 
+                'Anonymous',
+          email: userData.email || '',
+          points: userPoints,
+          userId: doc.id,
+          photoURL: userData.photoURL,
+          role: userData.role,
+          institution: userData.institution
+        });
+      });
+
+      const rankedUsers = calculateRanks(usersData);
+      console.log(`One-time fetch: ${rankedUsers.length} users ranked`);
+      
+      setTopUsers(rankedUsers);
+      setLastUpdated(new Date().toLocaleTimeString());
+      
+    } catch (queryError: any) {
+      console.error("One-time fetch also failed:", queryError);
+      
+      if (queryError.code === 'permission-denied') {
+        setError("Permission denied. Please ensure Firestore rules allow public reading of users collection.");
+      } else if (queryError.code === 'failed-precondition') {
+        setError("Firestore index required. Please create a composite index for 'users/totalPoints' in Firebase Console.");
+      } else {
+        setError(`Unable to load leaderboard data: ${queryError.message || 'Unknown error'}`);
+      }
+      
       setTopUsers([]);
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
+  };
+
+  // Handle manual refresh
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    
+    // Clean up existing listener
+    if (unsubscribe) {
+      unsubscribe();
+      setUnsubscribe(null);
+    }
+    
+    fetchLeaderboardData();
   };
 
   // Get rank display - show badges for top 3, numbers for others
@@ -127,6 +274,7 @@ const GlobalLeaderboard = () => {
 
   // Get user initials for avatar
   const getUserInitials = (name: string) => {
+    if (!name) return "??";
     return name
       .split(' ')
       .map(part => part.charAt(0))
@@ -140,15 +288,17 @@ const GlobalLeaderboard = () => {
   };
 
   useEffect(() => {
-    fetchLeaderboardData(); // Initial fetch
+    fetchLeaderboardData();
     
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(fetchLeaderboardData, 30000);
-    
-    return () => clearInterval(interval);
+    // Cleanup listener on unmount
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, []);
 
-  if (loading) {
+  if (loading && !isRefreshing) {
     return (
       <>
         <Navbar />
@@ -187,12 +337,24 @@ const GlobalLeaderboard = () => {
               <p className="text-muted-foreground text-sm lg:text-base">
                 Top performers based on all-time challenge points
               </p>
-              {lastUpdated && (
-                <Badge variant="outline" className="mt-2 text-xs">
-                  <Clock className="w-3 h-3 mr-1" />
-                  Updated {lastUpdated}
-                </Badge>
-              )}
+              <div className="flex items-center justify-center gap-3 mt-3">
+                {lastUpdated && (
+                  <Badge variant="outline" className="text-xs">
+                    <Clock className="w-3 h-3 mr-1" />
+                    Updated {lastUpdated}
+                  </Badge>
+                )}
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={handleRefresh}
+                  disabled={isRefreshing}
+                  className="text-xs"
+                >
+                  <RefreshCw className={`w-3 h-3 mr-1 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  {isRefreshing ? 'Refreshing...' : 'Refresh'}
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -201,6 +363,15 @@ const GlobalLeaderboard = () => {
               <AlertCircle className="w-4 h-4 text-yellow-600" />
               <AlertDescription className="text-yellow-800 text-sm">
                 {error}
+                <div className="mt-2 text-xs">
+                  <strong>Firebase Console Steps:</strong>
+                  <ol className="list-decimal ml-4 mt-1 space-y-1">
+                    <li>Go to Firebase Console → Firestore Database</li>
+                    <li>Click "Indexes" tab</li>
+                    <li>Create composite index: Collection: "users", Fields: "totalPoints" DESC</li>
+                    <li>Wait 1-5 minutes for index to build</li>
+                  </ol>
+                </div>
               </AlertDescription>
             </Alert>
           )}
@@ -223,14 +394,23 @@ const GlobalLeaderboard = () => {
                   <Trophy className="w-16 h-16 lg:w-20 lg:h-20 mx-auto mb-4 opacity-50" />
                   <p className="text-base lg:text-lg mb-2">No users found in leaderboard</p>
                   <p className="text-sm lg:text-base mb-4">
-                    This could be due to Firestore rules restrictions or no users have points yet
+                    Start solving challenges to earn points and appear on the leaderboard!
                   </p>
-                  <button 
-                    onClick={fetchLeaderboardData}
-                    className="px-6 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm"
-                  >
-                    Refresh Data
-                  </button>
+                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    <Button 
+                      onClick={handleRefresh}
+                      disabled={isRefreshing}
+                    >
+                      <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                      Refresh Data
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={() => navigate("/challenges")}
+                    >
+                      View Challenges
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -252,12 +432,16 @@ const GlobalLeaderboard = () => {
                                     src={user.photoURL} 
                                     alt={user.name}
                                     className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      // Hide image on error, will show fallback
+                                      const img = e.target as HTMLImageElement;
+                                      img.style.display = 'none';
+                                    }}
                                   />
-                                ) : (
-                                  <AvatarFallback className="bg-primary/20 text-primary font-bold text-xs">
-                                    {getUserInitials(user.name)}
-                                  </AvatarFallback>
-                                )}
+                                ) : null}
+                                <AvatarFallback className="bg-primary/20 text-primary font-bold text-xs">
+                                  {getUserInitials(user.name)}
+                                </AvatarFallback>
                               </Avatar>
                               <div>
                                 <div className="font-semibold text-foreground text-sm">{user.name}</div>
@@ -269,9 +453,11 @@ const GlobalLeaderboard = () => {
                               <div className="text-xs text-muted-foreground">points</div>
                             </div>
                           </div>
-                          <div className="text-xs text-muted-foreground">
-                            {user.institution || 'No institution'}
-                          </div>
+                          {user.institution && (
+                            <div className="text-xs text-muted-foreground">
+                              {user.institution}
+                            </div>
+                          )}
                         </CardContent>
                       </Card>
                     ))}
@@ -311,12 +497,15 @@ const GlobalLeaderboard = () => {
                                       src={user.photoURL} 
                                       alt={user.name}
                                       className="w-full h-full object-cover"
+                                      onError={(e) => {
+                                        const img = e.target as HTMLImageElement;
+                                        img.style.display = 'none';
+                                      }}
                                     />
-                                  ) : (
-                                    <AvatarFallback className="bg-primary/20 text-primary font-bold">
-                                      {getUserInitials(user.name)}
-                                    </AvatarFallback>
-                                  )}
+                                  ) : null}
+                                  <AvatarFallback className="bg-primary/20 text-primary font-bold">
+                                    {getUserInitials(user.name)}
+                                  </AvatarFallback>
                                 </Avatar>
                                 <div>
                                   <div className="font-semibold text-foreground">
@@ -359,6 +548,9 @@ const GlobalLeaderboard = () => {
                     <p className="text-xs text-muted-foreground">
                       This leaderboard tracks overall performance across all events and challenges on the platform. 
                       Points are accumulated from all completed challenges regardless of event participation.
+                      <span className="block mt-1 text-primary font-medium">
+                        ✓ Updates in real-time when users earn points
+                      </span>
                     </p>
                   </div>
                 </div>
