@@ -27,7 +27,12 @@ import LiveEventDetails from './components/LiveEventDetails';
 import PastEventDetails from './components/PastEventDetails';
 import Navbar from './components/Navbar';
 import MigrationPage from './pages/MigrationPage';
-import UserProfile from './components/UserProfile'; // ADD THIS LINE
+import UserProfile from './components/UserProfile';
+
+// Import the new settings pages
+import ProfileSettings from './components/ProfileSettings';
+import PasswordSettings from './components/PasswordSettings';
+import AccountSettings from './components/AccountSettings';
 
 function App() {
   return (
@@ -53,8 +58,42 @@ function App() {
                   <Route path="/leaderboard/live" element={<LiveLeaderboard />} />
                   <Route path="/writeups" element={<Writeups />} />
                   
-                  {/* ADD THIS PROFILE ROUTE */}
+                  {/* User Profile Route */}
                   <Route path="/profile/:userId" element={<UserProfile />} />
+                  
+                  {/* Settings Routes - Protected */}
+                  <Route 
+                    path="/settings/profile" 
+                    element={
+                      <ProtectedRoute>
+                        <UserOnlyRoute>
+                          <ProfileSettings />
+                        </UserOnlyRoute>
+                      </ProtectedRoute>
+                    } 
+                  />
+                  
+                  <Route 
+                    path="/settings/password" 
+                    element={
+                      <ProtectedRoute>
+                        <UserOnlyRoute>
+                          <PasswordSettings />
+                        </UserOnlyRoute>
+                      </ProtectedRoute>
+                    } 
+                  />
+                  
+                  <Route 
+                    path="/settings/account" 
+                    element={
+                      <ProtectedRoute>
+                        <UserOnlyRoute>
+                          <AccountSettings />
+                        </UserOnlyRoute>
+                      </ProtectedRoute>
+                    } 
+                  />
                   
                   {/* User-Only Routes (Regular users only) */}
                   <Route 

@@ -46,7 +46,7 @@ interface AuthContextType {
     isCorrect: boolean;
     message: string;
     pointsAwarded: number;
-  }>; // NEW: Add flag submission function
+  }>;
 }
 
 const AuthContext = createContext<AuthContextType>({ 
@@ -61,13 +61,23 @@ const AuthContext = createContext<AuthContextType>({
   updateUserProfile: async () => {},
   createMissingUserDocuments: async () => {},
   updateUserActivity: async () => {},
-  submitFlag: async () => ({ success: false, isCorrect: false, message: 'Not implemented', pointsAwarded: 0 }) // NEW
+  submitFlag: async () => ({ success: false, isCorrect: false, message: 'Not implemented', pointsAwarded: 0 })
 });
+
+// Clean username for Firestore (MUST MATCH ProfileSettings.tsx)
+const cleanUsername = (username: string): string => {
+  return username
+    .trim()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9_]/g, '')
+    .toLowerCase();
+};
 
 // Function to check if username is available
 const isUsernameAvailable = async (username: string): Promise<boolean> => {
   try {
-    const usernameRef = doc(db, "usernames", username.toLowerCase());
+    const cleanedUsername = cleanUsername(username);
+    const usernameRef = doc(db, "usernames", cleanedUsername);
     const usernameSnap = await getDoc(usernameRef);
     return !usernameSnap.exists();
   } catch (error) {
@@ -85,7 +95,16 @@ const createUserDocument = async (user: User, customUsername?: string, displayNa
 
   if (!userSnap.exists()) {
     const email = user.email || "";
-    const finalUsername = customUsername || email.split('@')[0] || `user_${user.uid.substring(0, 8)}`;
+    let finalUsername = customUsername || email.split('@')[0] || `user_${user.uid.substring(0, 8)}`;
+    
+    // Clean the username
+    finalUsername = cleanUsername(finalUsername);
+    
+    // Generate a fallback username if cleaned result is empty
+    if (!finalUsername) {
+      finalUsername = `user_${user.uid.substring(0, 8)}`;
+    }
+    
     const finalDisplayName = displayName || user.displayName || finalUsername;
     
     // Check if username is available
@@ -100,7 +119,7 @@ const createUserDocument = async (user: User, customUsername?: string, displayNa
         uid: user.uid,
         email: email,
         displayName: finalDisplayName,
-        username: finalUsername.toLowerCase(),
+        username: finalUsername, // Save CLEANED username
         photoURL: user.photoURL || null,
         role: 'user',
         totalPoints: 0,
@@ -121,20 +140,21 @@ const createUserDocument = async (user: User, customUsername?: string, displayNa
 
       await setDoc(userRef, userData);
 
-      // Create username entry for uniqueness check
-      const usernameRef = doc(db, "usernames", finalUsername.toLowerCase());
+      // Create username entry for uniqueness check (use cleaned username as document ID)
+      const usernameRef = doc(db, "usernames", finalUsername);
       await setDoc(usernameRef, {
         userId: user.uid,
-        username: finalUsername.toLowerCase(),
+        username: finalUsername,
         createdAt: serverTimestamp(),
-        email: email
+        email: email,
+        displayName: finalDisplayName
       });
 
       // Create leaderboard entry
       const leaderboardRef = doc(db, "leaderboard", user.uid);
       await setDoc(leaderboardRef, {
         userId: user.uid,
-        username: finalUsername.toLowerCase(),
+        username: finalUsername,
         displayName: finalDisplayName,
         totalPoints: 0,
         challengesSolved: 0,
@@ -146,7 +166,7 @@ const createUserDocument = async (user: User, customUsername?: string, displayNa
         lastActive: serverTimestamp()
       });
 
-      console.log("Created user document for:", user.uid);
+      console.log("Created user document for:", user.uid, "with username:", finalUsername);
       return userRef;
     } catch (error) {
       console.error("Error creating user document:", error);
@@ -162,7 +182,7 @@ const createUserDocument = async (user: User, customUsername?: string, displayNa
   return userRef;
 };
 
-// NEW: Function to check if flag is correct and update everything
+// Function to check if flag is correct and update everything
 const checkFlagAndUpdate = async (userId: string, challengeId: string, submittedFlag: string, challengeTitle: string, points: number) => {
   try {
     // 1. Get the challenge to check the flag
@@ -292,13 +312,33 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
+      // Clean the username if provided
+      let cleanedUsername = username;
+      if (cleanedUsername) {
+        cleanedUsername = cleanUsername(cleanedUsername);
+        
+        // Validate username format
+        if (!cleanedUsername) {
+          throw new Error("Username cannot be empty");
+        }
+        if (cleanedUsername.length < 3) {
+          throw new Error("Username must be at least 3 characters");
+        }
+        if (cleanedUsername.length > 20) {
+          throw new Error("Username must be less than 20 characters");
+        }
+        if (!/^[a-zA-Z0-9_]+$/.test(cleanedUsername)) {
+          throw new Error("Username can only contain letters, numbers, and underscores");
+        }
+      }
+      
       // Update display name if provided
       if (displayName) {
         await updateProfile(user, { displayName });
       }
       
-      // Create user document in Firestore with custom username
-      await createUserDocument(user, username, displayName);
+      // Create user document in Firestore with cleaned username
+      await createUserDocument(user, cleanedUsername, displayName);
       
       return { success: true };
     } catch (error: any) {
@@ -492,7 +532,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  // NEW: Function to submit flag and update everything
+  // Function to submit flag and update everything
   const submitFlag = async (challengeId: string, flag: string, challengeTitle: string, points: number) => {
     if (!user) {
       return {
@@ -663,7 +703,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       updateUserProfile,
       createMissingUserDocuments,
       updateUserActivity,
-      submitFlag // NEW: Add submitFlag function
+      submitFlag
     }}>
       {children}
     </AuthContext.Provider>

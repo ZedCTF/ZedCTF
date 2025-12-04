@@ -8,16 +8,18 @@ import {
   Award, 
   GraduationCap, 
   Users, 
-  Target
+  Target,
+  ExternalLink,
+  Key,
+  Shield
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuthContext } from "../contexts/AuthContext";
 import { db } from "../firebase";
 import { useNavigate } from "react-router-dom";
-import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, getDocs, orderBy } from "firebase/firestore";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
-import ProfileModal from "./ProfileModal";
 
 interface UserStats {
   totalPoints: number;
@@ -25,13 +27,12 @@ interface UserStats {
   currentRank: number;
   username: string;
   joinDate: string;
-  firstName?: string;
-  lastName?: string;
   displayName?: string;
   bio?: string;
   role?: string;
   institution?: string;
   photoURL?: string;
+  country?: string;
 }
 
 interface Event {
@@ -41,7 +42,6 @@ interface Event {
   prize: string;
   position: number;
   pointsEarned: number;
-  participants?: string[];
 }
 
 interface Challenge {
@@ -60,7 +60,6 @@ const Dashboard = () => {
   const [eventsParticipated, setEventsParticipated] = useState<Event[]>([]);
   const [recentChallenges, setRecentChallenges] = useState<Challenge[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<any>(null);
 
   // Get role icon
@@ -91,7 +90,7 @@ const Dashboard = () => {
     }
   };
 
-  // Format date properly
+  // Format date
   const formatDate = (dateInput: any) => {
     try {
       if (!dateInput) return "recently";
@@ -110,9 +109,7 @@ const Dashboard = () => {
         date = new Date();
       }
       
-      if (isNaN(date.getTime())) {
-        return "recently";
-      }
+      if (isNaN(date.getTime())) return "recently";
       
       return date.toLocaleDateString('en-US', {
         year: 'numeric',
@@ -121,259 +118,160 @@ const Dashboard = () => {
       });
       
     } catch (error) {
-      console.error("Date formatting error:", error);
       return "recently";
     }
   };
 
-  // Calculate user's REAL rank from global leaderboard
-  const calculateUserRank = async (userId: string, userPoints: number) => {
+  // Calculate rank
+  const calculateUserRank = async (userId: string) => {
     try {
-      console.log("Calculating REAL rank for user:", userId, "with points:", userPoints);
-      
-      // Get all users sorted by points to get real ranking
-      const usersQuery = query(
-        collection(db, "users"),
-        orderBy("totalPoints", "desc")
-      );
-      
+      const usersQuery = query(collection(db, "users"), orderBy("totalPoints", "desc"));
       const usersSnapshot = await getDocs(usersQuery);
       
-      if (usersSnapshot.empty) {
-        console.log("No users found in database");
-        return 1; // If no users, user is rank 1
-      }
+      if (usersSnapshot.empty) return 1;
 
-      const allUsers = usersSnapshot.docs.map(doc => ({
-        id: doc.id,
-        totalPoints: Number(doc.data().totalPoints) || 0,
-        displayName: doc.data().displayName || doc.data().username || 'Anonymous'
-      }));
-
-      console.log(`Found ${allUsers.length} users for REAL rank calculation`);
-
-      // Find the user's actual position in the sorted list
       let rank = 1;
-      for (let i = 0; i < allUsers.length; i++) {
-        if (allUsers[i].id === userId) {
-          console.log(`User found at REAL position ${i + 1} in leaderboard`);
-          return i + 1; // Return actual position (1-based index)
-        }
+      for (const doc of usersSnapshot.docs) {
+        if (doc.id === userId) return rank;
+        rank++;
       }
 
-      // If user not found in the query (shouldn't happen but just in case)
-      console.log("User not found in leaderboard query, this shouldn't happen");
-      return allUsers.length + 1; // Return last position
-
+      return rank;
     } catch (error) {
-      console.error("Error calculating REAL user rank:", error);
-      return 0; // Return 0 if unable to calculate
+      return 0;
     }
   };
 
-  // Fetch REAL solved challenges for the user
+  // Fetch solved challenges
   const fetchSolvedChallenges = async (userId: string) => {
     try {
-      // Get all challenges and filter those solved by the user
       const challengesQuery = query(
         collection(db, "challenges"),
-        where("isActive", "==", true)
+        where("isActive", "==", true),
+        where("solvedBy", "array-contains", userId)
       );
       
       const challengesSnapshot = await getDocs(challengesQuery);
       const solvedChallenges: Challenge[] = [];
 
       challengesSnapshot.forEach(doc => {
-        const challengeData = doc.data();
-        // Check if this challenge was solved by the user
-        if (challengeData.solvedBy && Array.isArray(challengeData.solvedBy)) {
-          if (challengeData.solvedBy.includes(userId)) {
-            solvedChallenges.push({
-              id: doc.id,
-              title: challengeData.title || 'Untitled Challenge',
-              points: challengeData.points || 0,
-              solvedAt: challengeData.solvedAt || new Date(),
-              category: challengeData.category || 'general',
-              difficulty: challengeData.difficulty || 'easy'
-            });
-          }
+        const data = doc.data();
+        if (data.solvedBy?.includes(userId)) {
+          solvedChallenges.push({
+            id: doc.id,
+            title: data.title || 'Untitled',
+            points: data.points || 0,
+            solvedAt: data.solvedAt || new Date(),
+            category: data.category || 'general',
+            difficulty: data.difficulty || 'easy'
+          });
         }
       });
 
-      // Sort by solvedAt date (most recent first) and limit to 5
-      const sortedChallenges = solvedChallenges
+      return solvedChallenges
         .sort((a, b) => {
           const dateA = a.solvedAt?.toDate ? a.solvedAt.toDate() : new Date(a.solvedAt);
           const dateB = b.solvedAt?.toDate ? b.solvedAt.toDate() : new Date(b.solvedAt);
           return dateB.getTime() - dateA.getTime();
         })
         .slice(0, 5);
-
-      console.log(`Found ${sortedChallenges.length} REAL solved challenges`);
-      return sortedChallenges;
-
     } catch (error) {
-      console.error("Error fetching REAL solved challenges:", error);
       return [];
     }
   };
 
-  // Fetch REAL events participated
+  // Fetch events
   const fetchEventsParticipated = async (userId: string) => {
     try {
-      const eventsQuery = query(
-        collection(db, "events")
-      );
-      
+      const eventsQuery = query(collection(db, "events"));
       const eventsSnapshot = await getDocs(eventsQuery);
       const userEvents: Event[] = [];
 
       eventsSnapshot.forEach(doc => {
-        const eventData = doc.data();
-        // Check if user participated in this event
-        if (eventData.participants && Array.isArray(eventData.participants)) {
-          if (eventData.participants.includes(userId)) {
-            userEvents.push({
-              id: doc.id,
-              name: eventData.name || 'Unnamed Event',
-              date: eventData.date || 'Unknown date',
-              prize: eventData.prize || 'Participation',
-              position: eventData.position || 0,
-              pointsEarned: eventData.pointsEarned || 0
-            });
-          }
+        const data = doc.data();
+        if (data.participants?.includes(userId)) {
+          userEvents.push({
+            id: doc.id,
+            name: data.name || 'Unnamed Event',
+            date: data.date || 'Unknown',
+            prize: data.prize || 'Participation',
+            position: data.position || 0,
+            pointsEarned: data.pointsEarned || 0
+          });
         }
       });
 
-      // Sort by date (most recent first) and limit to 5
-      const sortedEvents = userEvents
+      return userEvents
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
         .slice(0, 5);
-
-      console.log(`Found ${sortedEvents.length} REAL events participated`);
-      return sortedEvents;
-
     } catch (error) {
-      console.error("Error fetching REAL events:", error);
       return [];
     }
   };
 
-  // Fetch REAL user dashboard data from Firestore
+  // Fetch dashboard data
   const fetchDashboardData = async () => {
     if (!user) return;
 
     try {
       setLoading(true);
       
-      console.log("Fetching REAL dashboard data for user:", user.uid);
-
-      // 1. Fetch REAL user stats from Firestore
       const userDoc = await getDoc(doc(db, "users", user.uid));
       
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        console.log("REAL user data from Firestore:", userData);
-        
         setUserProfile(userData);
         
-        const userPoints = Number(userData.totalPoints) || 0;
-        const challengesSolved = Number(userData.challengesSolved) || 0;
-
-        // Calculate REAL rank from global leaderboard
-        const actualRank = await calculateUserRank(user.uid, userPoints);
-
-        // Get REAL solved challenges
+        const points = Number(userData.totalPoints) || 0;
         const solvedChallenges = await fetchSolvedChallenges(user.uid);
-
-        // Get REAL events participated
+        const challengesSolved = solvedChallenges.length;
+        const rank = await calculateUserRank(user.uid);
         const userEvents = await fetchEventsParticipated(user.uid);
-
-        // Get join date
-        let joinDate = userData.createdAt;
-        if (!joinDate && user?.metadata?.creationTime) {
-          joinDate = user.metadata.creationTime;
-        }
+        const joinDate = userData.createdAt || user?.metadata?.creationTime || new Date().toISOString();
         
         setUserStats({
-          totalPoints: userPoints,
+          totalPoints: points,
           challengesSolved: challengesSolved,
-          currentRank: actualRank,
-          username: userData.username || user?.email?.split('@')[0] || 'Hacker',
-          joinDate: joinDate || new Date().toISOString(),
-          firstName: userData.firstName,
-          lastName: userData.lastName,
+          currentRank: rank,
+          username: userData.username || user?.email?.split('@')[0] || 'User',
+          joinDate: joinDate,
           displayName: userData.displayName,
           bio: userData.bio,
           role: userData.role,
           institution: userData.institution,
-          photoURL: userData.photoURL
+          photoURL: userData.photoURL,
+          country: userData.country
         });
 
         setRecentChallenges(solvedChallenges);
         setEventsParticipated(userEvents);
-      } else {
-        console.log("No user document found in Firestore");
-        const joinDate = user?.metadata?.creationTime || new Date().toISOString();
-        
-        setUserStats({
-          totalPoints: 0,
-          challengesSolved: 0,
-          currentRank: 0,
-          username: user?.email?.split('@')[0] || 'Hacker',
-          joinDate: joinDate
-        });
-        setRecentChallenges([]);
-        setEventsParticipated([]);
       }
-
     } catch (err) {
-      console.error("Error fetching REAL dashboard data:", err);
-      const joinDate = user?.metadata?.creationTime || new Date().toISOString();
-      
-      setUserStats({
-        totalPoints: 0,
-        challengesSolved: 0,
-        currentRank: 0,
-        username: user?.email?.split('@')[0] || 'Hacker',
-        joinDate: joinDate
-      });
-      setRecentChallenges([]);
-      setEventsParticipated([]);
+      console.error("Error:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  // Handle profile modal close with refresh
-  const handleProfileModalClose = () => {
-    setIsProfileModalOpen(false);
-    setTimeout(() => {
-      fetchDashboardData();
-    }, 1000);
-  };
-
-  // Navigate to user's own profile page
-  const navigateToMyProfile = () => {
-    if (user) {
-      navigate(`/profile/${user.uid}`);
-    }
-  };
+  // Navigation
+  const navigateToMyProfile = () => user && navigate(`/profile/${user.uid}`);
+  const navigateToPracticeChallenge = (id: string) => navigate(`/practice/challenge/${id}`);
+  const navigateToProfileSettings = () => navigate('/settings/profile');
+  const navigateToPasswordSettings = () => navigate('/settings/password');
+  const navigateToAccountSettings = () => navigate('/settings/account');
 
   useEffect(() => {
-    if (user) {
-      fetchDashboardData();
-    }
+    if (user) fetchDashboardData();
   }, [user]);
 
   if (loading) {
     return (
       <>
         <Navbar />
-        <section id="dashboard" className="pt-20 lg:pt-24 pb-16 min-h-screen bg-background">
+        <section className="pt-20 lg:pt-24 pb-16 min-h-screen bg-background">
           <div className="container px-4 mx-auto text-center">
             <div className="animate-spin w-16 h-16 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
-            <p className="mt-4 text-muted-foreground">Loading your dashboard...</p>
+            <p className="mt-4 text-muted-foreground">Loading...</p>
           </div>
         </section>
         <Footer />
@@ -384,126 +282,107 @@ const Dashboard = () => {
   return (
     <>
       <Navbar />
-      <section id="dashboard" className="pt-20 lg:pt-24 pb-16 min-h-screen bg-background">
+      <section className="pt-20 lg:pt-24 pb-16 min-h-screen bg-background">
         <div className="container px-4 mx-auto">
-          {/* User Welcome Section - Now Clickable */}
-          <div className="mb-6 lg:mb-8">
-            <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-              <div className="flex items-center gap-4">
-                <div className="relative shrink-0">
-                  <div 
-                    className="w-14 h-14 sm:w-16 sm:h-16 bg-primary/20 rounded-full flex items-center justify-center overflow-hidden border-2 border-primary/30 cursor-pointer hover:border-primary transition-colors"
-                    onClick={navigateToMyProfile}
-                    title="View Your Public Profile"
-                  >
-                    {user?.photoURL || userProfile?.photoURL ? (
-                      <img 
-                        src={user?.photoURL || userProfile?.photoURL} 
-                        alt="Profile" 
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <User className="w-6 h-6 sm:w-8 sm:h-8 text-primary" />
-                    )}
-                  </div>
-                  <button
-                    onClick={() => setIsProfileModalOpen(true)}
-                    className="absolute -bottom-1 -right-1 bg-primary text-primary-foreground rounded-full p-1 hover:bg-primary/90 transition-colors z-10"
-                    title="Edit Profile"
-                  >
-                    <Settings className="w-3 h-3" />
-                  </button>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2">
-                    <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold break-words">
-                      Welcome back,{" "}
-                      <span className="text-primary cursor-pointer hover:underline" onClick={navigateToMyProfile}>
-                        {userStats?.displayName || user?.displayName || userStats?.username || user?.email?.split('@')[0] || 'Hacker'}
-                      </span>
-                    </h2>
-                    <button
-                      onClick={navigateToMyProfile}
-                      className="w-4 h-4 text-muted-foreground cursor-pointer hover:text-primary text-lg"
-                      title="View Public Profile"
-                    >
-                      ↗
-                    </button>
-                  </div>
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-sm text-muted-foreground mt-1">
-                    <span className="break-all">{user?.email}</span>
-                    {userProfile?.role && (
-                      <>
-                        <span className="hidden sm:inline">•</span>
-                        <div className="flex items-center gap-1">
-                          {getRoleIcon(userProfile.role)}
-                          <span>{getRoleLabel(userProfile.role)}</span>
-                        </div>
-                      </>
-                    )}
-                    <span className="hidden sm:inline">•</span>
-                    <span className="text-xs sm:text-sm">
-                      Member since{" "}
-                      {formatDate(userStats?.joinDate)}
-                    </span>
-                  </div>
-                  {userProfile?.institution && (
-                    <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-                      {userProfile.institution}
-                    </p>
-                  )}
-                  {userProfile?.bio && (
-                    <p className="text-xs sm:text-sm text-muted-foreground mt-1 line-clamp-2">
-                      {userProfile.bio}
-                    </p>
-                  )}
-                  <button 
-                    onClick={navigateToMyProfile}
-                    className="mt-2 text-xs text-primary hover:underline"
-                  >
-                    View your public profile ↗
-                  </button>
-                </div>
+          {/* Header */}
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h1 className="text-3xl font-bold">Dashboard</h1>
+                <p className="text-muted-foreground">Welcome back, {userStats?.displayName || userStats?.username}</p>
               </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={navigateToMyProfile}
+                  className="px-4 py-2 border border-border hover:bg-muted transition-colors rounded-lg flex items-center gap-2"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Public Profile
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <button
+                onClick={navigateToProfileSettings}
+                className="p-4 border border-border rounded-lg hover:bg-card transition-colors text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-primary/10 rounded-lg">
+                    <User className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="font-medium">Profile Settings</p>
+                    <p className="text-sm text-muted-foreground">Update your profile details</p>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={navigateToPasswordSettings}
+                className="p-4 border border-border rounded-lg hover:bg-card transition-colors text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-primary/10 rounded-lg">
+                    <Key className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="font-medium">Password</p>
+                    <p className="text-sm text-muted-foreground">Change or reset password</p>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={navigateToAccountSettings}
+                className="p-4 border border-border rounded-lg hover:bg-card transition-colors text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-primary/10 rounded-lg">
+                    <Shield className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="font-medium">Account</p>
+                    <p className="text-sm text-muted-foreground">Manage account settings</p>
+                  </div>
+                </div>
+              </button>
             </div>
           </div>
 
-          {/* Statistics Grid - REAL Data */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 lg:mb-8">
-            <Card className="border-border hover:border-primary/50 transition-all duration-300">
-              <CardHeader className="flex flex-row items-center justify-between pb-2 p-4">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Total Points
-                </CardTitle>
-                <Trophy className="w-5 h-5 text-primary" />
-              </CardHeader>
-              <CardContent className="p-4 pt-0">
-                <div className="text-2xl lg:text-3xl font-bold mb-2">
-                  {userStats?.totalPoints?.toLocaleString() || "0"}
+          {/* Statistics */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle>Total Points</CardTitle>
+                  <Trophy className="w-5 h-5 text-primary" />
                 </div>
-                <p className="text-xs text-muted-foreground">From {userStats?.challengesSolved || 0} solved challenges</p>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">{userStats?.totalPoints?.toLocaleString() || "0"}</div>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {userStats?.challengesSolved || 0} solved challenges
+                </p>
               </CardContent>
             </Card>
 
-            <Card className="border-border hover:border-primary/50 transition-all duration-300">
-              <CardHeader className="flex flex-row items-center justify-between pb-2 p-4">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Global Rank
-                </CardTitle>
-                <TrendingUp className="w-5 h-5 text-primary" />
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle>Global Rank</CardTitle>
+                  <TrendingUp className="w-5 h-5 text-primary" />
+                </div>
               </CardHeader>
-              <CardContent className="p-4 pt-0">
-                <div 
-                  className="text-2xl lg:text-3xl font-bold mb-2 cursor-pointer hover:text-primary transition-colors"
-                  onClick={() => navigate("/leaderboard/global")}
-                  title="View Global Leaderboard"
-                >
+              <CardContent>
+                <div className="text-3xl font-bold">
                   {userStats?.currentRank ? `#${userStats.currentRank}` : "Unranked"}
                 </div>
-                <p className="text-xs text-muted-foreground">Real position on global leaderboard</p>
+                <p className="text-sm text-muted-foreground mt-1">Global leaderboard position</p>
                 <button 
                   onClick={() => navigate("/leaderboard/global")}
-                  className="mt-2 text-xs text-primary hover:underline"
+                  className="mt-2 text-sm text-primary hover:underline"
                 >
                   View leaderboard →
                 </button>
@@ -513,46 +392,42 @@ const Dashboard = () => {
 
           {/* Recent Activity */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Recently Solved Challenges - REAL Data */}
-            <Card className="border-border">
-              <CardHeader className="p-4 sm:p-6">
-                <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
                   <Target className="w-5 h-5 text-primary" />
-                  Recently Solved Challenges
+                  Recent Challenges
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-4 sm:p-6 pt-0">
+              <CardContent>
                 {recentChallenges.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <Target className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p className="text-base">No challenges solved yet</p>
-                    <p className="text-sm mt-2 mb-4">Solve challenges to see them here</p>
+                    <p>No challenges solved yet</p>
                     <button 
-                      onClick={() => navigate('/challenges')}
-                      className="px-6 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm"
+                      onClick={() => navigate('/practice')}
+                      className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm"
                     >
                       Browse Challenges
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     {recentChallenges.map((challenge) => (
                       <div 
                         key={challenge.id} 
-                        className="flex items-center justify-between p-4 rounded-lg bg-muted/20 border border-border hover:bg-muted/40 cursor-pointer transition-colors"
-                        onClick={() => navigate(`/challenge/${challenge.id}`)}
+                        className="flex items-center justify-between p-3 rounded-lg bg-muted/20 border border-border hover:bg-muted/40 cursor-pointer transition-colors"
+                        onClick={() => navigateToPracticeChallenge(challenge.id)}
                       >
-                        <div className="flex-1">
-                          <div className="font-medium text-base hover:text-primary transition-colors">
+                        <div>
+                          <div className="font-medium hover:text-primary transition-colors">
                             {challenge.title}
                           </div>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
-                            <span className="capitalize">{challenge.category}</span>
-                            <span>•</span>
-                            <span className="capitalize">{challenge.difficulty}</span>
+                          <div className="text-sm text-muted-foreground">
+                            {challenge.category} • {challenge.difficulty}
                           </div>
                         </div>
-                        <div className="text-primary font-bold text-lg">+{challenge.points}</div>
+                        <div className="text-primary font-bold">+{challenge.points}</div>
                       </div>
                     ))}
                   </div>
@@ -560,47 +435,37 @@ const Dashboard = () => {
               </CardContent>
             </Card>
 
-            {/* Events Participated - REAL Data */}
-            <Card className="border-border">
-              <CardHeader className="p-4 sm:p-6">
-                <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
                   <Calendar className="w-5 h-5 text-primary" />
-                  Events Participated In
+                  Recent Events
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-4 sm:p-6 pt-0">
+              <CardContent>
                 {eventsParticipated.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p className="text-base">No events participated yet</p>
-                    <p className="text-sm mt-2 mb-4">Join CTF events to compete</p>
+                    <p>No events participated yet</p>
                     <button 
-                      onClick={() => navigate('/events')}
-                      className="px-6 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90 transition-colors text-sm"
+                      onClick={() => navigate('/live')}
+                      className="mt-4 px-4 py-2 bg-secondary text-secondary-foreground rounded-lg hover:bg-secondary/90 transition-colors text-sm"
                     >
                       View Events
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     {eventsParticipated.map((event) => (
-                      <div key={event.id} className="flex items-center justify-between p-4 rounded-lg bg-muted/20 border border-border">
-                        <div className="flex-1">
-                          <div className="font-medium text-base">{event.name}</div>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
-                            <span>{formatDate(event.date)}</span>
-                            {event.position > 0 && (
-                              <>
-                                <span>•</span>
-                                <span>Position: #{event.position}</span>
-                              </>
-                            )}
-                          </div>
+                      <div key={event.id} className="p-3 rounded-lg bg-muted/20 border border-border">
+                        <div className="font-medium">{event.name}</div>
+                        <div className="text-sm text-muted-foreground">
+                          {formatDate(event.date)} • Position: #{event.position}
                         </div>
-                        <div className="text-right">
-                          <div className="text-secondary font-bold">{event.prize}</div>
+                        <div className="mt-2 flex justify-between items-center">
+                          <span className="text-secondary font-medium">{event.prize}</span>
                           {event.pointsEarned > 0 && (
-                            <div className="text-sm text-primary">+{event.pointsEarned} pts</div>
+                            <span className="text-primary text-sm">+{event.pointsEarned} pts</span>
                           )}
                         </div>
                       </div>
@@ -613,12 +478,6 @@ const Dashboard = () => {
         </div>
       </section>
       <Footer />
-
-      {/* Profile Modal */}
-      <ProfileModal 
-        isOpen={isProfileModalOpen}
-        onClose={handleProfileModalClose}
-      />
     </>
   );
 };

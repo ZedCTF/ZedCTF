@@ -13,7 +13,8 @@ import {
   Settings,
   List,
   Edit3,
-  RefreshCw
+  RefreshCw,
+  UserCheck // NEW ICON
 } from "lucide-react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
@@ -32,7 +33,8 @@ import WriteupReview from "./admin/WriteupReview";
 import PlatformAnalytics from "./admin/PlatformAnalytics";
 import SystemSettings from "./admin/SystemSettings";
 import AddChallenges from "./admin/AddChallenges";
-import LeaderboardRecalc from "./admin/LeaderboardRecalc"; // NEW IMPORT
+import LeaderboardRecalc from "./admin/LeaderboardRecalc";
+import UsernameSync from "./admin/UsernameSync"; // NEW IMPORT
 
 interface Stats {
   totalUsers: number;
@@ -249,8 +251,10 @@ const AdminDashboard = () => {
         return isAdmin ? <PlatformAnalytics onBack={() => setActiveView("overview")} /> : renderAccessDenied();
       case "settings":
         return isAdmin ? <SystemSettings onBack={() => setActiveView("overview")} /> : renderAccessDenied();
-      case "leaderboard-recalc": // NEW CASE
+      case "leaderboard-recalc":
         return isAdmin ? <LeaderboardRecalc onBack={() => setActiveView("overview")} /> : renderAccessDenied();
+      case "username-sync": // NEW CASE
+        return isAdmin ? <UsernameSync onBack={() => setActiveView("overview")} /> : renderAccessDenied();
       default:
         return renderOverview();
     }
@@ -394,6 +398,16 @@ const AdminDashboard = () => {
               <Button 
                 variant="outline" 
                 className="w-full justify-start gap-2"
+                onClick={() => setActiveView("username-sync")} // NEW BUTTON
+              >
+                <UserCheck className="w-4 h-4" /> {/* NEW ICON */}
+                Sync Usernames
+              </Button>
+            )}
+            {isAdmin && (
+              <Button 
+                variant="outline" 
+                className="w-full justify-start gap-2"
                 onClick={() => setActiveView("leaderboard-recalc")}
               >
                 <RefreshCw className="w-4 h-4" />
@@ -454,7 +468,8 @@ const AdminDashboard = () => {
                    activeView === "review-writeups" ? "Review Write-ups" :
                    activeView === "analytics" ? "Platform Analytics" :
                    activeView === "settings" ? "System Settings" :
-                   activeView === "leaderboard-recalc" ? "Leaderboard Recalculation" : // NEW TITLE
+                   activeView === "leaderboard-recalc" ? "Leaderboard Recalculation" :
+                   activeView === "username-sync" ? "Username Synchronization" : // NEW TITLE
                    "Admin Dashboard"}
                 </h1>
                 <p className="text-muted-foreground">
@@ -467,7 +482,9 @@ const AdminDashboard = () => {
                     : activeView === "add-challenges"
                     ? "Add challenges to your event"
                     : activeView === "leaderboard-recalc"
-                    ? "Fix missing points and update leaderboard rankings" // NEW DESCRIPTION
+                    ? "Fix missing points and update leaderboard rankings"
+                    : activeView === "username-sync" // NEW DESCRIPTION
+                    ? "Fix username inconsistencies between users and usernames collections"
                     : isAdmin ? "Admin management panel" : "Moderator management panel"
                   }
                 </p>
@@ -481,6 +498,8 @@ const AdminDashboard = () => {
                       setActiveView("challenge-management");
                     } else if (activeView === "challenge-management" || activeView === "event-management" || activeView === "add-challenges") {
                       setActiveView("overview");
+                    } else if (activeView === "username-sync") { // NEW CASE
+                      setActiveView("overview");
                     } else {
                       setActiveView("overview");
                     }
@@ -493,6 +512,8 @@ const AdminDashboard = () => {
                   {activeView === "create-challenge" || activeView === "edit-challenge" 
                     ? "Back to Challenges" 
                     : activeView === "challenge-management" || activeView === "event-management" || activeView === "add-challenges"
+                    ? "Back to Dashboard"
+                    : activeView === "username-sync" // NEW TEXT
                     ? "Back to Dashboard"
                     : "Back to Dashboard"
                   }

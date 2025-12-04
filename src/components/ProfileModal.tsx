@@ -1,19 +1,19 @@
 import { useState, useRef, useEffect } from "react";
-import { X, Camera, User, BookOpen, GraduationCap, Award, Users, CheckCircle, Key, Mail, Trash2, AlertTriangle } from "lucide-react";
-import { updateProfile, updatePassword, sendPasswordResetEmail, deleteUser, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
-import { doc, updateDoc, getDoc, deleteDoc, collection, query, where, getDocs, writeBatch, setDoc } from "firebase/firestore";
+import { X, Camera, User, CheckCircle, Key, Mail, Trash2, AlertTriangle, Globe, Lock } from "lucide-react";
+import { updateProfile, updatePassword, sendPasswordResetEmail, deleteUser } from "firebase/auth";
+import { doc, updateDoc, getDoc, deleteDoc, setDoc } from "firebase/firestore";
 import { auth, db, storage } from "../firebase";
-import { ref, uploadBytes, getDownloadURL, deleteObject, listAll } from "firebase/storage";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuthContext } from "../contexts/AuthContext";
 
 interface ProfileModalProps {
   isOpen: boolean;
-  onClose: () => void;
+  onClose: (refresh?: boolean) => void;
+  userProfile?: any;
+  userId?: string;
 }
 
-type UserRole = 'student' | 'lecturer' | 'expert' | 'general';
-
-const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
+const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose, userProfile, userId }) => {
   const { user } = useAuthContext();
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -23,85 +23,78 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
   
   const [formData, setFormData] = useState({
     displayName: '',
-    username: '',
     bio: '',
-    role: 'student' as UserRole,
-    institution: ''
+    institution: '',
+    country: '',
+    photoURL: '',
+    username: '',
+    profileVisibility: 'public' // 'public' or 'private'
   });
 
   const [securityData, setSecurityData] = useState({
-    currentPassword: '',
     newPassword: '',
     confirmPassword: ''
   });
 
   const [deleteData, setDeleteData] = useState({
-    confirmText: '',
-    confirmPassword: ''
+    confirmText: ''
   });
 
   const [profileImage, setProfileImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [securityMessage, setSecurityMessage] = useState({ type: '', text: '' });
   const [deleteMessage, setDeleteMessage] = useState({ type: '', text: '' });
-  const [usernameMessage, setUsernameMessage] = useState({ type: '', text: '' });
+  const [errorMessage, setErrorMessage] = useState('');
 
   // Load user data when modal opens
   useEffect(() => {
     if (isOpen && user) {
-      const fetchUserData = async () => {
-        try {
-          const userDoc = await getDoc(doc(db, "users", user.uid));
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
-            setFormData({
-              displayName: userData.displayName || user.displayName || '',
-              username: userData.username || '',
-              bio: userData.bio || '',
-              role: userData.role || 'student',
-              institution: userData.institution || ''
-            });
-            setPreviewUrl(userData.photoURL || user.photoURL || '');
-          } else {
-            setFormData({
-              displayName: user.displayName || '',
-              username: '',
-              bio: '',
-              role: 'student',
-              institution: ''
-            });
-            setPreviewUrl(user.photoURL || '');
-          }
-        } catch (error) {
-          console.error("Error fetching user data:", error);
-        }
-      };
-      fetchUserData();
+      if (userProfile) {
+        setFormData({
+          displayName: userProfile.displayName || user.displayName || '',
+          bio: userProfile.bio || '',
+          institution: userProfile.institution || '',
+          country: userProfile.country || '',
+          photoURL: userProfile.photoURL || '',
+          username: userProfile.username || '',
+          profileVisibility: userProfile.profileVisibility || 'public'
+        });
+        setPreviewUrl(userProfile.photoURL || user.photoURL || '');
+      } else {
+        setFormData({
+          displayName: user.displayName || '',
+          bio: '',
+          institution: '',
+          country: '',
+          photoURL: '',
+          username: '',
+          profileVisibility: 'public'
+        });
+        setPreviewUrl(user.photoURL || '');
+      }
     }
-  }, [isOpen, user]);
+  }, [isOpen, user, userProfile]);
 
   // Reset form when modal closes
   useEffect(() => {
     if (!isOpen) {
       setActiveTab('profile');
       setSecurityData({
-        currentPassword: '',
         newPassword: '',
         confirmPassword: ''
       });
       setDeleteData({
-        confirmText: '',
-        confirmPassword: ''
+        confirmText: ''
       });
       setSecurityMessage({ type: '', text: '' });
       setDeleteMessage({ type: '', text: '' });
-      setUsernameMessage({ type: '', text: '' });
+      setErrorMessage('');
       setProfileImage(null);
-      setPreviewUrl(user?.photoURL || '');
+      setSaveSuccess(false);
     }
   }, [isOpen, user]);
 
-  // Handle profile form input changes
+  // Handle form input changes
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -109,9 +102,8 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
       [name]: value
     }));
     
-    if (name === 'username' && usernameMessage.text) {
-      setUsernameMessage({ type: '', text: '' });
-    }
+    // Clear error message when user starts typing
+    if (errorMessage) setErrorMessage('');
   };
 
   // Handle security form input changes
@@ -158,12 +150,41 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
+  // Clean username: remove spaces and special characters
+  const cleanUsername = (username: string): string => {
+    return username
+      .trim()
+      .replace(/\s+/g, '_') // Replace spaces with underscores
+      .replace(/[^a-zA-Z0-9_]/g, '') // Remove special characters
+      .toLowerCase();
+  };
+
+  // Validate username
+  const validateUsername = (username: string): { valid: boolean; message: string } => {
+    if (!username.trim()) return { valid: false, message: 'Username is required' };
+    
+    const cleaned = cleanUsername(username);
+    
+    if (cleaned.length < 3) return { valid: false, message: 'Username must be at least 3 characters' };
+    if (cleaned.length > 20) return { valid: false, message: 'Username must be less than 20 characters' };
+    if (!/^[a-zA-Z0-9_]+$/.test(cleaned)) return { valid: false, message: 'Username can only contain letters, numbers, and underscores' };
+    
+    return { valid: true, message: '' };
+  };
+
   // Check if username is available
   const checkUsernameAvailability = async (username: string): Promise<boolean> => {
-    if (!username || username === formData.username) return true;
+    if (!username) return false;
+    
+    const cleaned = cleanUsername(username);
+    
+    // If username is same as current, it's available
+    if (userProfile?.username && cleaned === cleanUsername(userProfile.username)) {
+      return true;
+    }
     
     try {
-      const usernameDoc = await getDoc(doc(db, "usernames", username.toLowerCase()));
+      const usernameDoc = await getDoc(doc(db, "usernames", cleaned));
       return !usernameDoc.exists();
     } catch (error) {
       console.error("Error checking username:", error);
@@ -171,16 +192,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  // Validate username
-  const validateUsername = (username: string): { valid: boolean; message: string } => {
-    if (!username) return { valid: false, message: 'Username is required' };
-    if (username.length < 3) return { valid: false, message: 'Username must be at least 3 characters' };
-    if (username.length > 20) return { valid: false, message: 'Username must be less than 20 characters' };
-    if (!/^[a-zA-Z0-9_]+$/.test(username)) return { valid: false, message: 'Username can only contain letters, numbers, and underscores' };
-    return { valid: true, message: '' };
-  };
-
-  // Compress image before upload
+  // Compress image
   const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promise<File> => {
     return new Promise((resolve, reject) => {
       const canvas = document.createElement('canvas');
@@ -223,7 +235,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     });
   };
 
-  // Upload image to Firebase Storage
+  // Upload image
   const uploadImage = async (file: File, userId: string): Promise<string> => {
     const compressedFile = await compressImage(file);
     
@@ -232,9 +244,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     const storageRef = ref(storage, `profile-pictures/${userId}/${fileName}`);
     
     const snapshot = await uploadBytes(storageRef, compressedFile);
-    const downloadURL = await getDownloadURL(snapshot.ref);
-    
-    return downloadURL;
+    return await getDownloadURL(snapshot.ref);
   };
 
   // Handle profile form submission
@@ -244,38 +254,37 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
 
     setLoading(true);
     setSaveSuccess(false);
-    setUsernameMessage({ type: '', text: '' });
+    setErrorMessage('');
 
     try {
-      const userDocRef = doc(db, "users", user.uid);
-      const userDoc = await getDoc(userDocRef);
-      const currentUserData = userDoc.exists() ? userDoc.data() : {};
-
-      if (formData.username && formData.username !== currentUserData.username) {
-        const validation = validateUsername(formData.username);
-        if (!validation.valid) {
-          setUsernameMessage({ type: 'error', text: validation.message });
-          setLoading(false);
-          return;
-        }
-
-        const isAvailable = await checkUsernameAvailability(formData.username);
-        if (!isAvailable) {
-          setUsernameMessage({ type: 'error', text: 'Username is already taken' });
-          setLoading(false);
-          return;
-        }
+      // Validate username
+      const usernameValidation = validateUsername(formData.username);
+      if (!usernameValidation.valid) {
+        setErrorMessage(usernameValidation.message);
+        setLoading(false);
+        return;
       }
 
-      let photoURL = user.photoURL;
+      // Clean the username
+      const cleanedUsername = cleanUsername(formData.username);
+      
+      // Check if username is available
+      const isAvailable = await checkUsernameAvailability(cleanedUsername);
+      if (!isAvailable) {
+        setErrorMessage('Username is already taken. Please choose another one.');
+        setLoading(false);
+        return;
+      }
 
+      // Upload image if selected
+      let photoURL = user.photoURL;
       if (profileImage) {
         setUploading(true);
         try {
           photoURL = await uploadImage(profileImage, user.uid);
         } catch (error) {
           console.error("Error uploading image:", error);
-          alert("Failed to upload image. Please try again.");
+          setErrorMessage("Failed to upload image. Please try again.");
           setLoading(false);
           setUploading(false);
           return;
@@ -284,98 +293,74 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
         }
       }
 
-      const updatePromises = [];
+      // Update Firebase Auth profile
       const authUpdates: any = {};
-      let needsAuthUpdate = false;
-      
       if (formData.displayName !== user.displayName) {
         authUpdates.displayName = formData.displayName;
-        needsAuthUpdate = true;
       }
-      
       if (photoURL !== user.photoURL) {
         authUpdates.photoURL = photoURL;
-        needsAuthUpdate = true;
-      }
-      
-      if (needsAuthUpdate) {
-        updatePromises.push(
-          updateProfile(user, authUpdates).catch(error => {
-            console.error("Error updating auth profile:", error);
-            return Promise.resolve();
-          })
-        );
       }
 
-      if (formData.username && formData.username !== currentUserData.username) {
-        const usernameLower = formData.username.toLowerCase();
-        const currentUsername = currentUserData.username || '';
-        
-        if (currentUsername && usernameLower !== currentUsername.toLowerCase()) {
-          const oldUsernameDoc = await getDoc(doc(db, "usernames", currentUsername.toLowerCase()));
-          if (oldUsernameDoc.exists()) {
-            updatePromises.push(
-              deleteDoc(doc(db, "usernames", currentUsername.toLowerCase()))
-            );
+      if (Object.keys(authUpdates).length > 0) {
+        await updateProfile(user, authUpdates);
+      }
+
+      // Get current user data
+      const userDocRef = doc(db, "users", user.uid);
+      const userDoc = await getDoc(userDocRef);
+      const currentData = userDoc.exists() ? userDoc.data() : {};
+
+      // Prepare updates according to Firestore rules
+      const updates: any = {
+        displayName: formData.displayName || null,
+        bio: formData.bio || null,
+        institution: formData.institution || null,
+        country: formData.country || null,
+        profileVisibility: formData.profileVisibility,
+        lastActive: new Date()
+      };
+
+      // Add photoURL if changed
+      if (photoURL) {
+        updates.photoURL = photoURL;
+      }
+
+      // Handle username update
+      if (cleanedUsername && cleanedUsername !== cleanUsername(currentData.username || '')) {
+        // Remove old username if it exists and is different
+        if (currentData.username && cleanedUsername !== cleanUsername(currentData.username)) {
+          try {
+            await deleteDoc(doc(db, "usernames", cleanUsername(currentData.username)));
+          } catch (error) {
+            console.warn("Could not remove old username:", error);
           }
         }
         
-        const usernameRef = doc(db, "usernames", usernameLower);
-        updatePromises.push(
-          setDoc(usernameRef, {
-            userId: user.uid,
-            createdAt: new Date()
-          }, { merge: true })
-        );
+        // Add new username to usernames collection
+        await setDoc(doc(db, "usernames", cleanedUsername), {
+          userId: user.uid,
+          createdAt: new Date()
+        });
+        
+        updates.username = cleanedUsername;
       }
 
-      const firestoreUpdates: any = {
-        uid: user.uid,
-        displayName: formData.displayName,
-        bio: formData.bio,
-        institution: formData.institution,
-        updatedAt: new Date()
-      };
-      
-      if (formData.username) {
-        firestoreUpdates.username = formData.username;
-      }
-      
-      if (photoURL) {
-        firestoreUpdates.photoURL = photoURL;
-      }
-      
-      if (currentUserData.role) {
-        firestoreUpdates.role = currentUserData.role;
-      }
-      
-      if (currentUserData.email) {
-        firestoreUpdates.email = currentUserData.email;
-      } else if (user.email) {
-        firestoreUpdates.email = user.email;
-      }
+      // Update user document
+      await updateDoc(userDocRef, updates);
 
-      updatePromises.push(updateDoc(userDocRef, firestoreUpdates));
-
-      await Promise.all(updatePromises);
-
-      console.log("Profile updated successfully");
       setSaveSuccess(true);
       
       setTimeout(() => {
-        onClose();
-        window.location.reload();
+        onClose(true);
       }, 1500);
 
     } catch (error: any) {
       console.error("Error updating profile:", error);
-      
       if (error.code === 'permission-denied') {
-        alert("Permission denied. Please check that your profile data follows the required format.");
-      } else if (error.code === 'auth/requires-recent-login') {
-        alert("For security, please sign out and sign back in before updating your profile.");
+        setErrorMessage('Permission denied. You may not have permission to update this profile.');
       } else {
-        alert(`Failed to update profile: ${error.message || 'Unknown error'}`);
+        setErrorMessage(`Failed to update profile: ${error.message || 'Unknown error'}`);
       }
     } finally {
       setLoading(false);
@@ -411,25 +396,16 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
       });
       
       setSecurityData({
-        currentPassword: '',
         newPassword: '',
         confirmPassword: ''
       });
 
     } catch (error: any) {
       console.error("Error changing password:", error);
-      
-      if (error.code === 'auth/requires-recent-login') {
-        setSecurityMessage({ 
-          type: 'error', 
-          text: 'For security, please re-authenticate by signing out and back in before changing your password.' 
-        });
-      } else {
-        setSecurityMessage({ 
-          type: 'error', 
-          text: error.message || 'Failed to change password. Please try again.' 
-        });
-      }
+      setSecurityMessage({ 
+        type: 'error', 
+        text: error.message || 'Failed to change password. Please try again.' 
+      });
     } finally {
       setLoading(false);
     }
@@ -459,10 +435,10 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  // COMPLETE ACCOUNT DELETION - SIMPLIFIED FOR YOUR CURRENT RULES
+  // Handle account deletion
   const handleDeleteAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !user.email) return;
+    if (!user) return;
 
     setLoading(true);
     setDeleteMessage({ type: '', text: '' });
@@ -479,235 +455,41 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
       }
 
       // Final warning
-      if (!window.confirm('⚠️ NUCLEAR OPTION ACTIVATED!\n\nThis will delete EVERYTHING:\n• Your account\n• All your data\n• All your submissions\n• Everything you created\n\nThis is PERMANENT and CANNOT BE UNDONE!\n\nAre you ABSOLUTELY sure?')) {
+      if (!window.confirm('⚠️ WARNING!\n\nThis will delete your account permanently.\n\nAre you ABSOLUTELY sure?')) {
         setLoading(false);
         return;
       }
 
-      console.log("Starting account deletion for user:", user.uid);
-
-      let totalDeleted = 0;
-
-      // 1. DELETE USER DOCUMENT (this already works!)
-      try {
-        const userRef = doc(db, "users", user.uid);
-        await deleteDoc(userRef);
-        totalDeleted++;
-        console.log("✅ User document deleted");
-      } catch (error) {
-        console.error("Error deleting user document:", error);
-        // Continue anyway - maybe it was already deleted
-      }
-
-      // 2. DELETE USERNAME REFERENCE
-      try {
-        // First get the username from user document before it's deleted
-        const userDoc = await getDoc(doc(db, "users", user.uid));
-        if (userDoc.exists()) {
-          const username = userDoc.data().username || '';
-          if (username) {
-            const usernameRef = doc(db, "usernames", username.toLowerCase());
-            await deleteDoc(usernameRef);
-            totalDeleted++;
-            console.log("✅ Username reference deleted");
-          }
-        }
-      } catch (error) {
-        console.warn("Could not delete username:", error);
-      }
-
-      // 3. DELETE FROM COLLECTIONS WHERE USERS HAVE DELETE PERMISSION
-      const collectionsWithDeletePermission = [
-        'submissions',
-        'scores', 
-        'comments',
-        'messages',
-        'writeups',
-        'teams',
-        'notifications',
-        'payments',
-        'hostRequests',
-        'reports',
-        'leaderboard'
-      ];
-
-      for (const collectionName of collectionsWithDeletePermission) {
+      // Delete user document
+      await deleteDoc(doc(db, "users", user.uid));
+      
+      // Delete username if exists
+      if (userProfile?.username) {
         try {
-          const q = query(
-            collection(db, collectionName),
-            where('userId', '==', user.uid)
-          );
-          const snapshot = await getDocs(q);
-          
-          if (snapshot.docs.length > 0) {
-            const batch = writeBatch(db);
-            snapshot.docs.forEach(doc => {
-              batch.delete(doc.ref);
-            });
-            await batch.commit();
-            totalDeleted += snapshot.docs.length;
-            console.log(`✅ Deleted ${snapshot.docs.length} documents from ${collectionName}`);
-          }
+          await deleteDoc(doc(db, "usernames", cleanUsername(userProfile.username)));
         } catch (error) {
-          console.warn(`Could not delete from ${collectionName}:`, error);
-          // Continue with other collections
+          console.warn("Could not delete username:", error);
         }
       }
 
-      // 4. SPECIAL HANDLING FOR MESSAGES (senderId OR receiverId)
-      try {
-        // Delete messages where user is sender
-        const sentQuery = query(
-          collection(db, 'messages'),
-          where('senderId', '==', user.uid)
-        );
-        const sentSnapshot = await getDocs(sentQuery);
-        
-        // Delete messages where user is receiver  
-        const receivedQuery = query(
-          collection(db, 'messages'),
-          where('receiverId', '==', user.uid)
-        );
-        const receivedSnapshot = await getDocs(receivedQuery);
-        
-        const allMessages = [...sentSnapshot.docs, ...receivedSnapshot.docs];
-        
-        if (allMessages.length > 0) {
-          const batch = writeBatch(db);
-          allMessages.forEach(doc => {
-            batch.delete(doc.ref);
-          });
-          await batch.commit();
-          totalDeleted += allMessages.length;
-          console.log(`✅ Deleted ${allMessages.length} messages`);
-        }
-      } catch (error) {
-        console.warn("Could not delete messages:", error);
-      }
-
-      // 5. SPECIAL HANDLING FOR TEAMS (remove from members or delete if owner)
-      try {
-        const teamsQuery = query(
-          collection(db, 'teams'),
-          where('members', 'array-contains', user.uid)
-        );
-        const teamsSnapshot = await getDocs(teamsQuery);
-        
-        if (teamsSnapshot.docs.length > 0) {
-          const batch = writeBatch(db);
-          
-          teamsSnapshot.docs.forEach(teamDoc => {
-            const teamData = teamDoc.data();
-            if (teamData.ownerId === user.uid) {
-              // Delete entire team if user is owner
-              batch.delete(teamDoc.ref);
-              console.log(`✅ Deleting team owned by user: ${teamDoc.id}`);
-            } else {
-              // Remove user from members array
-              const updatedMembers = teamData.members.filter((memberId: string) => memberId !== user.uid);
-              batch.update(teamDoc.ref, { members: updatedMembers });
-              console.log(`✅ Removing user from team: ${teamDoc.id}`);
-            }
-          });
-          
-          await batch.commit();
-          console.log(`✅ Processed ${teamsSnapshot.docs.length} teams`);
-        }
-      } catch (error) {
-        console.warn("Could not process teams:", error);
-      }
-
-      // 6. REMOVE FROM EVENTS (participants and pendingApprovals)
-      try {
-        const eventsQuery = query(
-          collection(db, 'events'),
-          where('participants', 'array-contains', user.uid)
-        );
-        const eventsSnapshot = await getDocs(eventsQuery);
-        
-        if (eventsSnapshot.docs.length > 0) {
-          const batch = writeBatch(db);
-          
-          eventsSnapshot.docs.forEach(eventDoc => {
-            const eventData = eventDoc.data();
-            const updatedParticipants = eventData.participants?.filter((participantId: string) => participantId !== user.uid) || [];
-            const updatedPendingApprovals = eventData.pendingApprovals?.filter((userId: string) => userId !== user.uid) || [];
-            
-            batch.update(eventDoc.ref, {
-              participants: updatedParticipants,
-              pendingApprovals: updatedPendingApprovals
-            });
-          });
-          
-          await batch.commit();
-          console.log(`✅ Removed user from ${eventsSnapshot.docs.length} events`);
-        }
-      } catch (error) {
-        console.warn("Could not remove from events:", error);
-      }
-
-      // 7. REMOVE FROM CHALLENGES (solvedBy array)
-      try {
-        const challengesQuery = query(
-          collection(db, 'challenges'),
-          where('solvedBy', 'array-contains', user.uid)
-        );
-        const challengesSnapshot = await getDocs(challengesQuery);
-        
-        if (challengesSnapshot.docs.length > 0) {
-          const batch = writeBatch(db);
-          
-          challengesSnapshot.docs.forEach(challengeDoc => {
-            const challengeData = challengeDoc.data();
-            const updatedSolvedBy = challengeData.solvedBy?.filter((userId: string) => userId !== user.uid) || [];
-            
-            batch.update(challengeDoc.ref, {
-              solvedBy: updatedSolvedBy
-            });
-          });
-          
-          await batch.commit();
-          console.log(`✅ Removed user from ${challengesSnapshot.docs.length} challenges`);
-        }
-      } catch (error) {
-        console.warn("Could not remove from challenges:", error);
-      }
-
-      console.log(`Total documents processed: ${totalDeleted}`);
-
-      // 8. FINALLY, DELETE THE USER FROM FIREBASE AUTH
-      console.log("Deleting user from Firebase Auth...");
+      // Delete user from Firebase Auth
       await deleteUser(user);
 
       setDeleteMessage({ 
         type: 'success', 
-        text: `✅ Account DELETED!\n\nUser account and data have been removed.\n\nYou will be redirected to the home page.` 
+        text: 'Account deleted successfully. Redirecting...' 
       });
 
-      // Redirect to home page after delay
       setTimeout(() => {
         window.location.href = '/';
       }, 2000);
 
     } catch (error: any) {
       console.error("Error deleting account:", error);
-      
-      if (error.code === 'auth/requires-recent-login') {
-        setDeleteMessage({ 
-          type: 'error', 
-          text: 'Security check failed. Please sign out and sign back in, then try again.' 
-        });
-      } else if (error.code === 'auth/wrong-password') {
-        setDeleteMessage({ 
-          type: 'error', 
-          text: 'Incorrect password. Please enter your current password to confirm deletion.' 
-        });
-      } else {
-        setDeleteMessage({ 
-          type: 'error', 
-          text: `Account deletion partially completed. Some data may still exist. Error: ${error.message || 'Unknown'}` 
-        });
-      }
+      setDeleteMessage({ 
+        type: 'error', 
+        text: error.message || 'Failed to delete account. Please try again.' 
+      });
     } finally {
       setLoading(false);
     }
@@ -727,7 +509,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
         <div className="flex items-center justify-between p-6 border-b border-border">
           <h2 className="text-xl font-semibold text-foreground">Account Settings</h2>
           <button
-            onClick={onClose}
+            onClick={() => onClose(false)}
             className="text-muted-foreground hover:text-foreground transition-colors"
             disabled={loading}
           >
@@ -784,6 +566,12 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
               <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded flex items-center gap-2">
                 <CheckCircle className="w-5 h-5" />
                 Profile updated successfully!
+              </div>
+            )}
+
+            {errorMessage && (
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                {errorMessage}
               </div>
             )}
 
@@ -847,7 +635,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
             {/* Username */}
             <div>
               <label htmlFor="username" className="block text-sm font-medium text-foreground mb-2">
-                Username
+                Username *
               </label>
               <input
                 id="username"
@@ -856,18 +644,60 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                 value={formData.username}
                 onChange={handleChange}
                 className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                placeholder="Enter unique username (3-20 characters)"
+                placeholder="samson_hatyoka (no spaces, 3-20 characters)"
                 disabled={loading}
+                required
               />
-              {usernameMessage.text && (
-                <p className={`mt-2 text-sm ${
-                  usernameMessage.type === 'error' ? 'text-red-600' : 'text-green-600'
-                }`}>
-                  {usernameMessage.text}
-                </p>
-              )}
               <p className="mt-1 text-xs text-muted-foreground">
-                Username can contain letters, numbers, and underscores. Must be unique.
+                This will be cleaned to: {cleanUsername(formData.username) || 'example_username'}
+              </p>
+            </div>
+
+            {/* Profile Visibility */}
+            <div>
+              <label htmlFor="profileVisibility" className="block text-sm font-medium text-foreground mb-2">
+                Profile Visibility
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-all ${
+                  formData.profileVisibility === 'public'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border hover:border-primary/50 text-foreground'
+                } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                  <input
+                    type="radio"
+                    name="profileVisibility"
+                    value="public"
+                    checked={formData.profileVisibility === 'public'}
+                    onChange={handleChange}
+                    className="hidden"
+                    disabled={loading}
+                  />
+                  <Globe className="w-4 h-4" />
+                  <span className="text-sm font-medium">Public</span>
+                </label>
+                <label className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-all ${
+                  formData.profileVisibility === 'private'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border hover:border-primary/50 text-foreground'
+                } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                  <input
+                    type="radio"
+                    name="profileVisibility"
+                    value="private"
+                    checked={formData.profileVisibility === 'private'}
+                    onChange={handleChange}
+                    className="hidden"
+                    disabled={loading}
+                  />
+                  <Lock className="w-4 h-4" />
+                  <span className="text-sm font-medium">Private</span>
+                </label>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {formData.profileVisibility === 'public' 
+                  ? 'Your profile will be visible to everyone'
+                  : 'Only you can see your profile details'}
               </p>
             </div>
 
@@ -888,42 +718,6 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
               />
             </div>
 
-            {/* Role */}
-            <div>
-              <label htmlFor="role" className="block text-sm font-medium text-foreground mb-2">
-                I am a
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { value: 'student', label: 'Student', icon: GraduationCap },
-                  { value: 'lecturer', label: 'Lecturer', icon: Users },
-                  { value: 'expert', label: 'Expert', icon: Award },
-                  { value: 'general', label: 'General User', icon: User }
-                ].map(({ value, label, icon: Icon }) => (
-                  <label
-                    key={value}
-                    className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-all ${
-                      formData.role === value
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border hover:border-primary/50 text-foreground'
-                    } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <input
-                      type="radio"
-                      name="role"
-                      value={value}
-                      checked={formData.role === value}
-                      onChange={handleChange}
-                      className="hidden"
-                      disabled={loading}
-                    />
-                    <Icon className="w-4 h-4" />
-                    <span className="text-sm font-medium">{label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
             {/* Institution */}
             <div>
               <label htmlFor="institution" className="block text-sm font-medium text-foreground mb-2">
@@ -941,11 +735,28 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
               />
             </div>
 
+            {/* Country */}
+            <div>
+              <label htmlFor="country" className="block text-sm font-medium text-foreground mb-2">
+                Country
+              </label>
+              <input
+                id="country"
+                name="country"
+                type="text"
+                value={formData.country}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                placeholder="Your country"
+                disabled={loading}
+              />
+            </div>
+
             {/* Actions */}
             <div className="flex gap-3 pt-4">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={() => onClose(false)}
                 disabled={loading}
                 className="flex-1 px-4 py-2 border border-border text-foreground rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
               >
@@ -953,7 +764,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
               </button>
               <button
                 type="submit"
-                disabled={loading || uploading}
+                disabled={loading || uploading || !formData.username.trim()}
                 className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {loading ? (
@@ -1065,7 +876,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
             <div className="pt-4">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={() => onClose(false)}
                 disabled={loading}
                 className="w-full px-4 py-2 border border-border text-foreground rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
               >
@@ -1075,35 +886,20 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
           </div>
         )}
 
-        {/* Danger Zone Tab - NUCLEAR DELETE OPTION */}
+        {/* Danger Zone Tab */}
         {activeTab === 'danger' && (
           <div className="p-6 space-y-6">
-            {/* Nuclear Warning */}
-            <div className="bg-red-900 border-2 border-red-600 text-white px-4 py-4 rounded-lg">
+            {/* Warning */}
+            <div className="bg-red-100 border-2 border-red-300 text-red-800 px-4 py-4 rounded-lg">
               <div className="flex items-start gap-3">
-                <AlertTriangle className="w-6 h-6 mt-0.5 flex-shrink-0 text-red-300" />
+                <AlertTriangle className="w-6 h-6 mt-0.5 flex-shrink-0" />
                 <div>
-                  <h4 className="font-bold text-lg mb-2">☢️ NUCLEAR DELETE OPTION</h4>
+                  <h4 className="font-bold text-lg mb-2">⚠️ Account Deletion</h4>
                   <p className="text-sm mb-3">
-                    This will <span className="font-bold text-yellow-300">COMPLETELY WIPE</span> all traces of your account from the system.
+                    This will permanently delete your account and all associated data.
                   </p>
-                  <div className="bg-red-950 p-3 rounded border border-red-700">
-                    <p className="text-sm font-semibold mb-2">🚨 WHAT WILL BE DELETED:</p>
-                    <ul className="text-xs space-y-1 ml-4 list-disc text-red-200">
-                      <li>Your user account (Firebase Auth)</li>
-                      <li>Your user profile document</li>
-                      <li>Your username reservation</li>
-                      <li>All your challenge submissions</li>
-                      <li>All your scores and achievements</li>
-                      <li>Comments and writeups you created</li>
-                      <li>Messages you sent or received</li>
-                      <li>Teams you own (or remove you from teams)</li>
-                      <li>Event registrations</li>
-                      <li>Challenge progress (removed from solvedBy)</li>
-                    </ul>
-                  </div>
-                  <p className="text-sm font-bold mt-3 text-center text-yellow-300">
-                    ⚠️ THIS IS PERMANENT AND CANNOT BE UNDONE! ⚠️
+                  <p className="text-sm font-bold mt-3">
+                    This action cannot be undone!
                   </p>
                 </div>
               </div>
@@ -1113,63 +909,45 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
             {deleteMessage.text && (
               <div className={`px-4 py-3 rounded-lg ${
                 deleteMessage.type === 'success' 
-                  ? 'bg-green-900 border border-green-600 text-green-100'
-                  : 'bg-red-900 border border-red-600 text-red-100'
+                  ? 'bg-green-100 border border-green-400 text-green-700'
+                  : 'bg-red-100 border border-red-400 text-red-700'
               }`}>
-                <pre className="whitespace-pre-wrap text-sm">{deleteMessage.text}</pre>
+                {deleteMessage.text}
               </div>
             )}
 
-            {/* Nuclear Delete Form */}
+            {/* Delete Form */}
             <form onSubmit={handleDeleteAccount} className="space-y-4">
-              <div className="space-y-3">
-                <div>
-                  <label htmlFor="confirmText" className="block text-sm font-medium text-red-300 mb-2">
-                    Type <span className="font-mono bg-red-950 px-2 py-1 rounded">DELETE MY ACCOUNT</span> to confirm
-                  </label>
-                  <input
-                    id="confirmText"
-                    name="confirmText"
-                    type="text"
-                    value={deleteData.confirmText}
-                    onChange={handleDeleteChange}
-                    className="w-full px-3 py-2 bg-gray-900 border-2 border-red-700 rounded-lg text-white placeholder-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all"
-                    placeholder="DELETE MY ACCOUNT"
-                    disabled={loading}
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="confirmPassword" className="block text-sm font-medium text-red-300 mb-2">
-                    Enter your current password for security verification (optional)
-                  </label>
-                  <input
-                    id="confirmPassword"
-                    name="confirmPassword"
-                    type="password"
-                    value={deleteData.confirmPassword}
-                    onChange={handleDeleteChange}
-                    className="w-full px-3 py-2 bg-gray-900 border-2 border-red-700 rounded-lg text-white placeholder-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all"
-                    placeholder="Your current password (optional)"
-                    disabled={loading}
-                  />
-                </div>
+              <div>
+                <label htmlFor="confirmText" className="block text-sm font-medium text-red-700 mb-2">
+                  Type <span className="font-mono bg-red-100 px-2 py-1 rounded">DELETE MY ACCOUNT</span> to confirm
+                </label>
+                <input
+                  id="confirmText"
+                  name="confirmText"
+                  type="text"
+                  value={deleteData.confirmText}
+                  onChange={handleDeleteChange}
+                  className="w-full px-3 py-2 bg-background border-2 border-red-300 rounded-lg text-foreground placeholder-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all"
+                  placeholder="DELETE MY ACCOUNT"
+                  disabled={loading}
+                />
               </div>
 
               <button
                 type="submit"
                 disabled={loading || deleteData.confirmText !== 'DELETE MY ACCOUNT'}
-                className="w-full px-4 py-3 bg-gradient-to-r from-red-700 to-red-900 text-white rounded-lg hover:from-red-800 hover:to-red-950 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 border border-red-600 shadow-lg shadow-red-900/30"
+                className="w-full px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {loading ? (
                   <>
                     <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
-                    <span className="font-semibold">DELETING ACCOUNT...</span>
+                    <span className="font-semibold">Deleting Account...</span>
                   </>
                 ) : (
                   <>
                     <Trash2 className="w-5 h-5" />
-                    <span className="font-bold">ACTIVATE ACCOUNT DELETION</span>
+                    <span className="font-bold">Delete Account</span>
                   </>
                 )}
               </button>
@@ -1181,9 +959,9 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                 type="button"
                 onClick={() => setActiveTab('profile')}
                 disabled={loading}
-                className="w-full px-4 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50"
+                className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
               >
-                ← Back to Safety
+                ← Back to Profile
               </button>
             </div>
           </div>
