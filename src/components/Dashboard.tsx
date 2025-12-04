@@ -1,5 +1,15 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Trophy, TrendingUp, User, Calendar, Settings, Award, GraduationCap, Users, Target } from "lucide-react";
+import { 
+  Trophy, 
+  TrendingUp, 
+  User, 
+  Calendar, 
+  Settings, 
+  Award, 
+  GraduationCap, 
+  Users, 
+  Target
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuthContext } from "../contexts/AuthContext";
 import { db } from "../firebase";
@@ -343,6 +353,13 @@ const Dashboard = () => {
     }, 1000);
   };
 
+  // Navigate to user's own profile page
+  const navigateToMyProfile = () => {
+    if (user) {
+      navigate(`/profile/${user.uid}`);
+    }
+  };
+
   useEffect(() => {
     if (user) {
       fetchDashboardData();
@@ -369,12 +386,16 @@ const Dashboard = () => {
       <Navbar />
       <section id="dashboard" className="pt-20 lg:pt-24 pb-16 min-h-screen bg-background">
         <div className="container px-4 mx-auto">
-          {/* User Welcome Section */}
+          {/* User Welcome Section - Now Clickable */}
           <div className="mb-6 lg:mb-8">
             <div className="flex flex-col sm:flex-row sm:items-start gap-4">
               <div className="flex items-center gap-4">
                 <div className="relative shrink-0">
-                  <div className="w-14 h-14 sm:w-16 sm:h-16 bg-primary/20 rounded-full flex items-center justify-center overflow-hidden border-2 border-primary/30">
+                  <div 
+                    className="w-14 h-14 sm:w-16 sm:h-16 bg-primary/20 rounded-full flex items-center justify-center overflow-hidden border-2 border-primary/30 cursor-pointer hover:border-primary transition-colors"
+                    onClick={navigateToMyProfile}
+                    title="View Your Public Profile"
+                  >
                     {user?.photoURL || userProfile?.photoURL ? (
                       <img 
                         src={user?.photoURL || userProfile?.photoURL} 
@@ -387,19 +408,28 @@ const Dashboard = () => {
                   </div>
                   <button
                     onClick={() => setIsProfileModalOpen(true)}
-                    className="absolute -bottom-1 -right-1 bg-primary text-primary-foreground rounded-full p-1 hover:bg-primary/90 transition-colors"
+                    className="absolute -bottom-1 -right-1 bg-primary text-primary-foreground rounded-full p-1 hover:bg-primary/90 transition-colors z-10"
                     title="Edit Profile"
                   >
                     <Settings className="w-3 h-3" />
                   </button>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold break-words">
-                    Welcome back,{" "}
-                    <span className="text-primary">
-                      {userStats?.displayName || user?.displayName || userStats?.username || user?.email?.split('@')[0] || 'Hacker'}
-                    </span>
-                  </h2>
+                  <div className="flex items-center gap-2 mb-2">
+                    <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold break-words">
+                      Welcome back,{" "}
+                      <span className="text-primary cursor-pointer hover:underline" onClick={navigateToMyProfile}>
+                        {userStats?.displayName || user?.displayName || userStats?.username || user?.email?.split('@')[0] || 'Hacker'}
+                      </span>
+                    </h2>
+                    <button
+                      onClick={navigateToMyProfile}
+                      className="w-4 h-4 text-muted-foreground cursor-pointer hover:text-primary text-lg"
+                      title="View Public Profile"
+                    >
+                      ↗
+                    </button>
+                  </div>
                   <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-sm text-muted-foreground mt-1">
                     <span className="break-all">{user?.email}</span>
                     {userProfile?.role && (
@@ -427,6 +457,12 @@ const Dashboard = () => {
                       {userProfile.bio}
                     </p>
                   )}
+                  <button 
+                    onClick={navigateToMyProfile}
+                    className="mt-2 text-xs text-primary hover:underline"
+                  >
+                    View your public profile ↗
+                  </button>
                 </div>
               </div>
             </div>
@@ -457,10 +493,20 @@ const Dashboard = () => {
                 <TrendingUp className="w-5 h-5 text-primary" />
               </CardHeader>
               <CardContent className="p-4 pt-0">
-                <div className="text-2xl lg:text-3xl font-bold mb-2">
+                <div 
+                  className="text-2xl lg:text-3xl font-bold mb-2 cursor-pointer hover:text-primary transition-colors"
+                  onClick={() => navigate("/leaderboard/global")}
+                  title="View Global Leaderboard"
+                >
                   {userStats?.currentRank ? `#${userStats.currentRank}` : "Unranked"}
                 </div>
                 <p className="text-xs text-muted-foreground">Real position on global leaderboard</p>
+                <button 
+                  onClick={() => navigate("/leaderboard/global")}
+                  className="mt-2 text-xs text-primary hover:underline"
+                >
+                  View leaderboard →
+                </button>
               </CardContent>
             </Card>
           </div>

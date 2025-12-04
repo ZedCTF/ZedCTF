@@ -26,7 +26,8 @@ import UpcomingEventDetails from './components/UpcomingEventDetails';
 import LiveEventDetails from './components/LiveEventDetails';
 import PastEventDetails from './components/PastEventDetails';
 import Navbar from './components/Navbar';
-import MigrationPage from './pages/MigrationPage'; // Add this import
+import MigrationPage from './pages/MigrationPage';
+import UserProfile from './components/UserProfile'; // ADD THIS LINE
 
 function App() {
   return (
@@ -43,7 +44,7 @@ function App() {
                   <Route path="/signup" element={<Signup />} />
                   <Route path="/auth/github/callback" element={<GitHubCallback />} />
                   
-                  {/* Migration Tool Route - Add this line */}
+                  {/* Migration Tool Route */}
                   <Route path="/migrate-users" element={<MigrationPage />} />
                   
                   {/* Public Routes */}
@@ -51,6 +52,9 @@ function App() {
                   <Route path="/leaderboard/global" element={<GlobalLeaderboard />} />
                   <Route path="/leaderboard/live" element={<LiveLeaderboard />} />
                   <Route path="/writeups" element={<Writeups />} />
+                  
+                  {/* ADD THIS PROFILE ROUTE */}
+                  <Route path="/profile/:userId" element={<UserProfile />} />
                   
                   {/* User-Only Routes (Regular users only) */}
                   <Route 

@@ -1,12 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Trophy, Users, AlertCircle, Clock, ArrowLeft, Globe, RefreshCw } from "lucide-react";
+import { Trophy, Users, Clock, ArrowLeft, Globe, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useEffect, useState } from "react";
 import { db } from "../firebase";
 import { collection, query, orderBy, limit, onSnapshot, getDocs } from "firebase/firestore";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
@@ -20,6 +19,8 @@ export interface TopUser {
   photoURL?: string;
   role?: string;
   institution?: string;
+  lastSolvedAt?: any;
+  joinDate?: any;
 }
 
 const GlobalLeaderboard = () => {
@@ -27,47 +28,76 @@ const GlobalLeaderboard = () => {
   const [topUsers, setTopUsers] = useState<TopUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>("");
-  const [error, setError] = useState<string>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [unsubscribe, setUnsubscribe] = useState<(() => void) | null>(null);
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10); // Show 10 users per page
 
-  // Calculate ranks with tie handling
+  // Ranking algorithm with tie-breaking
   const calculateRanks = (usersData: TopUser[]): TopUser[] => {
     if (usersData.length === 0) return [];
     
-    // Sort by points descending
-    const sortedUsers = [...usersData].sort((a, b) => b.points - a.points);
+    // Filter out admin users
+    const nonAdminUsers = usersData.filter(user => user.role !== 'admin');
     
-    let rankCounter = 1;
-    let previousPoints: number | null = null;
-    let sameRankCount = 0;
-    
-    return sortedUsers.map((user, index) => {
-      const userPoints = user.points || 0;
-      
-      // Calculate rank with tie handling
-      let currentRank = rankCounter;
-      if (previousPoints === userPoints) {
-        sameRankCount++;
-      } else {
-        rankCounter += sameRankCount + 1;
-        sameRankCount = 0;
-        currentRank = rankCounter;
+    // Sort with tie-breaking logic
+    const sortedUsers = [...nonAdminUsers].sort((a, b) => {
+      // 1. Primary sort: points (descending)
+      if (b.points !== a.points) {
+        return b.points - a.points;
       }
-      previousPoints = userPoints;
       
-      return {
-        ...user,
-        rank: currentRank
-      };
+      // 2. Secondary sort: last solved timestamp (descending - most recent first)
+      const aTime = a.lastSolvedAt?.toDate ? a.lastSolvedAt.toDate().getTime() : 
+                   a.joinDate?.toDate ? a.joinDate.toDate().getTime() : 0;
+      const bTime = b.lastSolvedAt?.toDate ? b.lastSolvedAt.toDate().getTime() : 
+                   b.joinDate?.toDate ? b.joinDate.toDate().getTime() : 0;
+      
+      if (aTime !== bTime) {
+        return bTime - aTime; // Most recent first
+      }
+      
+      // 3. Tertiary sort: name (alphabetical) for consistent ordering
+      return (a.name || '').localeCompare(b.name || '');
     });
+    
+    // Calculate ranks with proper tie handling
+    const rankedUsers: TopUser[] = [];
+    
+    sortedUsers.forEach((user, index) => {
+      // Check if this user has the same points as previous user
+      if (index === 0) {
+        // First user always gets rank 1
+        rankedUsers.push({ ...user, rank: 1 });
+      } else if (user.points === sortedUsers[index - 1].points) {
+        // Same points as previous user - check if also same timestamp for true tie
+        const currentTime = user.lastSolvedAt?.toDate ? user.lastSolvedAt.toDate().getTime() : 
+                           user.joinDate?.toDate ? user.joinDate.toDate().getTime() : 0;
+        const prevTime = sortedUsers[index - 1].lastSolvedAt?.toDate ? sortedUsers[index - 1].lastSolvedAt.toDate().getTime() : 
+                        sortedUsers[index - 1].joinDate?.toDate ? sortedUsers[index - 1].joinDate.toDate().getTime() : 0;
+        
+        if (currentTime === prevTime) {
+          // True tie - same rank as previous user
+          rankedUsers.push({ ...user, rank: rankedUsers[index - 1].rank });
+        } else {
+          // Different timestamps - new rank
+          rankedUsers.push({ ...user, rank: index + 1 });
+        }
+      } else {
+        // Different points - new rank
+        rankedUsers.push({ ...user, rank: index + 1 });
+      }
+    });
+    
+    return rankedUsers;
   };
 
-  // Fetch top users from Firestore based on totalPoints
+  // Fetch top users from Firestore with additional data for tie-breaking
   const fetchLeaderboardData = async () => {
     try {
       console.log("Fetching global leaderboard data from Firestore...");
-      setError("");
       
       const usersQuery = query(
         collection(db, "users"),
@@ -75,7 +105,6 @@ const GlobalLeaderboard = () => {
         limit(100)
       );
 
-      // Try to set up real-time listener first
       try {
         const unsubscribeListener = onSnapshot(usersQuery, 
           (snapshot) => {
@@ -93,9 +122,10 @@ const GlobalLeaderboard = () => {
             snapshot.forEach((doc) => {
               const userData = doc.data();
               const userPoints = userData.totalPoints || 0;
+              const userRole = userData.role || 'user';
               
               usersData.push({
-                rank: 0, // Will be calculated by calculateRanks
+                rank: 0,
                 name: userData.displayName || 
                       userData.username || 
                       userData.email?.split('@')[0] || 
@@ -104,8 +134,10 @@ const GlobalLeaderboard = () => {
                 points: userPoints,
                 userId: doc.id,
                 photoURL: userData.photoURL,
-                role: userData.role,
-                institution: userData.institution
+                role: userRole,
+                institution: userData.institution,
+                lastSolvedAt: userData.lastSolvedAt || userData.lastActive,
+                joinDate: userData.createdAt || userData.joinDate
               });
             });
 
@@ -119,18 +151,6 @@ const GlobalLeaderboard = () => {
           },
           (error) => {
             console.error("Real-time listener error:", error);
-            
-            // Provide specific error messages
-            if (error.code === 'permission-denied') {
-              setError("Permission denied. Please ensure Firestore rules allow public reading of users collection.");
-            } else if (error.code === 'failed-precondition') {
-              setError("Firestore index required. Please create a composite index for 'users/totalPoints' in Firebase Console.");
-            } else {
-              setError(`Unable to set up real-time updates: ${error.message || 'Unknown error'}`);
-            }
-            
-            // Fall back to one-time fetch if real-time fails
-            console.log("Falling back to one-time fetch due to listener error");
             handleOneTimeFetch();
           }
         );
@@ -145,7 +165,6 @@ const GlobalLeaderboard = () => {
 
     } catch (error: any) {
       console.error("Unexpected error fetching leaderboard data:", error);
-      setError(`Failed to load leaderboard data: ${error.message || 'Please try again later.'}`);
       setTopUsers([]);
       setLoading(false);
       setIsRefreshing(false);
@@ -177,9 +196,10 @@ const GlobalLeaderboard = () => {
       usersSnapshot.forEach((doc) => {
         const userData = doc.data();
         const userPoints = userData.totalPoints || 0;
+        const userRole = userData.role || 'user';
         
         usersData.push({
-          rank: 0, // Will be calculated by calculateRanks
+          rank: 0,
           name: userData.displayName || 
                 userData.username || 
                 userData.email?.split('@')[0] || 
@@ -188,8 +208,10 @@ const GlobalLeaderboard = () => {
           points: userPoints,
           userId: doc.id,
           photoURL: userData.photoURL,
-          role: userData.role,
-          institution: userData.institution
+          role: userRole,
+          institution: userData.institution,
+          lastSolvedAt: userData.lastSolvedAt || userData.lastActive,
+          joinDate: userData.createdAt || userData.joinDate
         });
       });
 
@@ -201,15 +223,6 @@ const GlobalLeaderboard = () => {
       
     } catch (queryError: any) {
       console.error("One-time fetch also failed:", queryError);
-      
-      if (queryError.code === 'permission-denied') {
-        setError("Permission denied. Please ensure Firestore rules allow public reading of users collection.");
-      } else if (queryError.code === 'failed-precondition') {
-        setError("Firestore index required. Please create a composite index for 'users/totalPoints' in Firebase Console.");
-      } else {
-        setError(`Unable to load leaderboard data: ${queryError.message || 'Unknown error'}`);
-      }
-      
       setTopUsers([]);
     } finally {
       setLoading(false);
@@ -220,8 +233,8 @@ const GlobalLeaderboard = () => {
   // Handle manual refresh
   const handleRefresh = () => {
     setIsRefreshing(true);
+    setCurrentPage(1); // Reset to first page on refresh
     
-    // Clean up existing listener
     if (unsubscribe) {
       unsubscribe();
       setUnsubscribe(null);
@@ -230,45 +243,43 @@ const GlobalLeaderboard = () => {
     fetchLeaderboardData();
   };
 
-  // Get rank display - show badges for top 3, numbers for others
+  // Get rank display - different badges for 1st, 2nd, 3rd
   const getRankDisplay = (rank: number) => {
-    if (rank <= 3) {
+    if (rank === 1) {
       return (
-        <div className="flex items-center justify-center gap-1">
-          {getRankBadge(rank)}
-          <span className="text-white font-bold text-sm">#{rank}</span>
+        <div className="flex flex-col items-center justify-center">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center">
+            <Trophy className="w-6 h-6 text-yellow-500" />
+          </div>
+          <span className="font-bold text-yellow-600 text-lg mt-1">#{rank}</span>
+        </div>
+      );
+    } else if (rank === 2) {
+      return (
+        <div className="flex flex-col items-center justify-center">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center">
+            <Trophy className="w-6 h-6 text-gray-400" />
+          </div>
+          <span className="font-bold text-gray-500 text-lg mt-1">#{rank}</span>
+        </div>
+      );
+    } else if (rank === 3) {
+      return (
+        <div className="flex flex-col items-center justify-center">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center">
+            <Trophy className="w-6 h-6 text-amber-600" />
+          </div>
+          <span className="font-bold text-amber-600 text-lg mt-1">#{rank}</span>
         </div>
       );
     } else {
-      return <span className="font-bold text-white text-sm">#{rank}</span>;
-    }
-  };
-
-  // Get badge icon based on rank
-  const getRankBadge = (rank: number) => {
-    switch (rank) {
-      case 1:
-        return <Trophy className="w-4 h-4 text-yellow-400" />;
-      case 2:
-        return <Trophy className="w-4 h-4 text-gray-300" />;
-      case 3:
-        return <Trophy className="w-4 h-4 text-amber-500" />;
-      default:
-        return null;
-    }
-  };
-
-  // Get rank color for background
-  const getRankColor = (rank: number) => {
-    switch (rank) {
-      case 1:
-        return "bg-gradient-to-br from-yellow-500 to-yellow-600";
-      case 2:
-        return "bg-gradient-to-br from-gray-500 to-gray-600";
-      case 3:
-        return "bg-gradient-to-br from-amber-600 to-amber-700";
-      default:
-        return "bg-primary";
+      return (
+        <div className="flex flex-col items-center justify-center">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center">
+            <span className="font-bold text-muted-foreground text-lg">#{rank}</span>
+          </div>
+        </div>
+      );
     }
   };
 
@@ -283,14 +294,37 @@ const GlobalLeaderboard = () => {
       .substring(0, 2);
   };
 
+  // Navigate to user profile
+  const navigateToUserProfile = (userId: string) => {
+    navigate(`/profile/${userId}`);
+  };
+
   const navigateBack = () => {
     navigate("/leaderboard");
+  };
+
+  // Calculate paginated users
+  const indexOfLastUser = currentPage * itemsPerPage;
+  const indexOfFirstUser = indexOfLastUser - itemsPerPage;
+  const currentUsers = topUsers.slice(indexOfFirstUser, indexOfLastUser);
+  const totalPages = Math.ceil(topUsers.length / itemsPerPage);
+
+  // Change page
+  const paginate = (pageNumber: number) => setCurrentPage(pageNumber);
+  const nextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
+  const prevPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
   };
 
   useEffect(() => {
     fetchLeaderboardData();
     
-    // Cleanup listener on unmount
     return () => {
       if (unsubscribe) {
         unsubscribe();
@@ -358,24 +392,6 @@ const GlobalLeaderboard = () => {
             </div>
           </div>
 
-          {error && (
-            <Alert className="max-w-2xl mx-auto mb-6 bg-yellow-50 border-yellow-200">
-              <AlertCircle className="w-4 h-4 text-yellow-600" />
-              <AlertDescription className="text-yellow-800 text-sm">
-                {error}
-                <div className="mt-2 text-xs">
-                  <strong>Firebase Console Steps:</strong>
-                  <ol className="list-decimal ml-4 mt-1 space-y-1">
-                    <li>Go to Firebase Console → Firestore Database</li>
-                    <li>Click "Indexes" tab</li>
-                    <li>Create composite index: Collection: "users", Fields: "totalPoints" DESC</li>
-                    <li>Wait 1-5 minutes for index to build</li>
-                  </ol>
-                </div>
-              </AlertDescription>
-            </Alert>
-          )}
-
           <Card className="border-border shadow-lg max-w-4xl mx-auto">
             <CardHeader className="bg-gradient-to-r from-primary/10 to-primary/5 border-b p-4 lg:p-6">
               <CardTitle className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
@@ -383,9 +399,16 @@ const GlobalLeaderboard = () => {
                   <Users className="w-4 h-4 lg:w-5 lg:h-5 text-primary" />
                   Top Platform Hackers
                 </span>
-                <span className="text-sm text-muted-foreground">
-                  {topUsers.length > 0 ? `${topUsers.length} Players` : 'No players found'}
-                </span>
+                <div className="flex flex-col sm:flex-row items-center gap-2">
+                  <span className="text-sm text-muted-foreground">
+                    {topUsers.length > 0 ? `${topUsers.length} Players` : 'No players found'}
+                  </span>
+                  {totalPages > 1 && (
+                    <span className="text-xs text-primary font-medium">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                  )}
+                </div>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
@@ -413,84 +436,80 @@ const GlobalLeaderboard = () => {
                   </div>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  {/* Mobile Cards View */}
-                  <div className="lg:hidden space-y-3 p-4">
-                    {topUsers.map((user) => (
-                      <Card key={user.userId} className="border-border">
-                        <CardContent className="p-4">
-                          <div className="flex items-center justify-between mb-3">
-                            <div className="flex items-center gap-3">
-                              <div className={`flex items-center justify-center w-10 h-10 rounded-full ${
-                                user.rank <= 3 ? getRankColor(user.rank) : 'bg-muted'
-                              }`}>
+                <>
+                  <div className="overflow-x-auto">
+                    {/* Desktop Table View */}
+                    <div className="hidden lg:block">
+                      <table className="w-full">
+                        <thead className="bg-muted/50">
+                          <tr>
+                            <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Rank</th>
+                            <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Player</th>
+                            <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Points</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {currentUsers.map((user) => (
+                            <tr 
+                              key={user.userId} 
+                              className={`hover:bg-muted/20 transition-all duration-200 cursor-pointer ${
+                                user.rank <= 3 ? 'bg-gradient-to-r from-primary/5 to-transparent' : ''
+                              }`}
+                              onClick={() => navigateToUserProfile(user.userId)}
+                            >
+                              <td className="px-6 py-4 whitespace-nowrap">
                                 {getRankDisplay(user.rank)}
-                              </div>
-                              <Avatar className="w-8 h-8 border-2 border-primary/20">
-                                {user.photoURL ? (
-                                  <img 
-                                    src={user.photoURL} 
-                                    alt={user.name}
-                                    className="w-full h-full object-cover"
-                                    onError={(e) => {
-                                      // Hide image on error, will show fallback
-                                      const img = e.target as HTMLImageElement;
-                                      img.style.display = 'none';
-                                    }}
-                                  />
-                                ) : null}
-                                <AvatarFallback className="bg-primary/20 text-primary font-bold text-xs">
-                                  {getUserInitials(user.name)}
-                                </AvatarFallback>
-                              </Avatar>
-                              <div>
-                                <div className="font-semibold text-foreground text-sm">{user.name}</div>
-                                <div className="text-xs text-muted-foreground">{user.role || 'Hacker'}</div>
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-lg font-bold text-primary">{user.points.toLocaleString()}</div>
-                              <div className="text-xs text-muted-foreground">points</div>
-                            </div>
-                          </div>
-                          {user.institution && (
-                            <div className="text-xs text-muted-foreground">
-                              {user.institution}
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="flex items-center gap-3">
+                                  <Avatar className="w-12 h-12 border-2 border-primary/20">
+                                    {user.photoURL ? (
+                                      <img 
+                                        src={user.photoURL} 
+                                        alt={user.name}
+                                        className="w-full h-full object-cover"
+                                        onError={(e) => {
+                                          const img = e.target as HTMLImageElement;
+                                          img.style.display = 'none';
+                                        }}
+                                      />
+                                    ) : null}
+                                    <AvatarFallback className="bg-primary/20 text-primary font-bold text-lg">
+                                      {getUserInitials(user.name)}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div>
+                                    <div className="font-semibold text-foreground text-lg hover:text-primary transition-colors">
+                                      {user.name}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-2xl font-bold text-primary">
+                                  {user.points.toLocaleString()}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
 
-                  {/* Desktop Table View */}
-                  <div className="hidden lg:block">
-                    <table className="w-full">
-                      <thead className="bg-muted/50">
-                        <tr>
-                          <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Rank</th>
-                          <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Player</th>
-                          <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Institution</th>
-                          <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Points</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border">
-                        {topUsers.map((user) => (
-                          <tr 
-                            key={user.userId} 
-                            className={`hover:bg-muted/20 transition-all duration-200 ${
-                              user.rank <= 3 ? 'bg-gradient-to-r from-primary/5 to-transparent' : ''
-                            }`}
-                          >
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className={`flex items-center justify-center w-12 h-12 rounded-full ${
-                                user.rank <= 3 ? getRankColor(user.rank) : 'bg-muted'
-                              }`}>
-                                {getRankDisplay(user.rank)}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
+                    {/* Mobile Cards View */}
+                    <div className="lg:hidden space-y-3 p-4">
+                      {currentUsers.map((user) => (
+                        <Card 
+                          key={user.userId} 
+                          className="border-border hover:border-primary/50 transition-colors cursor-pointer"
+                          onClick={() => navigateToUserProfile(user.userId)}
+                        >
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between mb-3">
                               <div className="flex items-center gap-3">
+                                <div>
+                                  {getRankDisplay(user.rank)}
+                                </div>
                                 <Avatar className="w-10 h-10 border-2 border-primary/20">
                                   {user.photoURL ? (
                                     <img 
@@ -508,29 +527,83 @@ const GlobalLeaderboard = () => {
                                   </AvatarFallback>
                                 </Avatar>
                                 <div>
-                                  <div className="font-semibold text-foreground">
+                                  <div className="font-semibold text-foreground text-base hover:text-primary transition-colors">
                                     {user.name}
-                                  </div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {user.role || 'Hacker'}
                                   </div>
                                 </div>
                               </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                              {user.institution || '-'}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="text-xl font-bold text-primary">
-                                {user.points.toLocaleString()}
+                              <div className="text-right">
+                                <div className="text-xl font-bold text-primary">{user.points.toLocaleString()}</div>
+                                <div className="text-xs text-muted-foreground">points</div>
                               </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                            </div>
+                            <div className="text-xs text-muted-foreground text-center">
+                              Tap to view profile
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
                   </div>
-                </div>
+
+                  {/* Pagination Controls */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between border-t border-border p-4">
+                      <div className="text-sm text-muted-foreground">
+                        Showing {indexOfFirstUser + 1} to {Math.min(indexOfLastUser, topUsers.length)} of {topUsers.length} players
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={prevPage}
+                          disabled={currentPage === 1}
+                          className="h-8 w-8 p-0"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        
+                        <div className="flex items-center gap-1">
+                          {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                            // Show current page and nearby pages
+                            let pageNum;
+                            if (totalPages <= 5) {
+                              pageNum = i + 1;
+                            } else if (currentPage <= 3) {
+                              pageNum = i + 1;
+                            } else if (currentPage >= totalPages - 2) {
+                              pageNum = totalPages - 4 + i;
+                            } else {
+                              pageNum = currentPage - 2 + i;
+                            }
+                            
+                            return (
+                              <Button
+                                key={pageNum}
+                                variant={currentPage === pageNum ? "default" : "outline"}
+                                size="sm"
+                                onClick={() => paginate(pageNum)}
+                                className="h-8 w-8 p-0"
+                              >
+                                {pageNum}
+                              </Button>
+                            );
+                          })}
+                        </div>
+                        
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={nextPage}
+                          disabled={currentPage === totalPages}
+                          className="h-8 w-8 p-0"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -548,6 +621,12 @@ const GlobalLeaderboard = () => {
                     <p className="text-xs text-muted-foreground">
                       This leaderboard tracks overall performance across all events and challenges on the platform. 
                       Points are accumulated from all completed challenges regardless of event participation.
+                      <span className="block mt-1 text-primary font-medium">
+                        ✓ Click on any player to view their profile and detailed stats
+                      </span>
+                      <span className="block mt-1 text-primary font-medium">
+                        ✓ Tie-breaking: Users with same points are ranked by most recent activity
+                      </span>
                       <span className="block mt-1 text-primary font-medium">
                         ✓ Updates in real-time when users earn points
                       </span>
