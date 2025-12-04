@@ -40,6 +40,11 @@ const UserProfile = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>("");
 
+  // Handle challenge click - navigate to practice challenge
+  const handleChallengeClick = (challengeId: string) => {
+    navigate(`/practice/challenge/${challengeId}`);
+  };
+
   // Get user data
   useEffect(() => {
     const fetchUserProfile = async () => {
@@ -56,13 +61,23 @@ const UserProfile = () => {
         }
 
         const userData = userDoc.data();
+        
+        // Get actual challenges solved count
+        const challengesQuery = query(
+          collection(db, "challenges"),
+          where("solvedBy", "array-contains", userId)
+        );
+        
+        const challengesSnapshot = await getDocs(challengesQuery);
+        const actualChallengesSolved = challengesSnapshot.size;
+
         const userProfile: UserProfileData = {
           id: userDoc.id,
           displayName: userData.displayName || userData.username || 'Anonymous',
           username: userData.username || '',
           email: userData.email || '',
           totalPoints: userData.totalPoints || 0,
-          challengesSolved: userData.challengesSolved || 0,
+          challengesSolved: actualChallengesSolved,
           role: userData.role || 'user',
           institution: userData.institution || '',
           bio: userData.bio || '',
@@ -74,12 +89,6 @@ const UserProfile = () => {
         setUser(userProfile);
 
         // Fetch recent challenges solved by this user
-        const challengesQuery = query(
-          collection(db, "challenges"),
-          where("solvedBy", "array-contains", userId)
-        );
-        
-        const challengesSnapshot = await getDocs(challengesQuery);
         const challenges: Challenge[] = [];
         
         challengesSnapshot.forEach(doc => {
@@ -246,8 +255,8 @@ const UserProfile = () => {
                   </AvatarFallback>
                 </Avatar>
                 
-                <div className="flex-1">
-                  <h1 className="text-3xl sm:text-4xl font-bold mb-2">{user.displayName}</h1>
+                <div className="flex-1 min-w-0">
+                  <h1 className="text-3xl sm:text-4xl font-bold mb-2 truncate">{user.displayName}</h1>
                   
                   <div className="flex flex-wrap items-center gap-3 mb-4">
                     {user.role && user.role !== 'user' && (
@@ -258,15 +267,15 @@ const UserProfile = () => {
                     )}
                     
                     <div className="flex items-center gap-1 text-muted-foreground">
-                      <Mail className="w-4 h-4" />
-                      <span className="text-sm">{user.email}</span>
+                      <Mail className="w-4 h-4 flex-shrink-0" />
+                      <span className="text-sm truncate">{user.email}</span>
                     </div>
                   </div>
 
                   {user.institution && (
-                    <p className="text-muted-foreground mb-3">
-                      <Building className="w-4 h-4 inline mr-2" />
-                      {user.institution}
+                    <p className="text-muted-foreground mb-3 flex items-center gap-2">
+                      <Building className="w-4 h-4 flex-shrink-0" />
+                      <span className="truncate">{user.institution}</span>
                     </p>
                   )}
 
@@ -285,54 +294,54 @@ const UserProfile = () => {
           {/* Stats Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 max-w-4xl mx-auto">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardHeader className="flex flex-row items-center justify-between pb-2 p-4">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
                   Total Points
                 </CardTitle>
                 <Trophy className="w-5 h-5 text-primary" />
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-4 pt-0">
                 <div className="text-3xl font-bold">{user.totalPoints.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">Global leaderboard points</p>
+                <p className="text-xs text-muted-foreground truncate">Global leaderboard points</p>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardHeader className="flex flex-row items-center justify-between pb-2 p-4">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
                   Challenges Solved
                 </CardTitle>
                 <Target className="w-5 h-5 text-primary" />
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-4 pt-0">
                 <div className="text-3xl font-bold">{user.challengesSolved}</div>
-                <p className="text-xs text-muted-foreground">Total challenges completed</p>
+                <p className="text-xs text-muted-foreground truncate">Total challenges completed</p>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardHeader className="flex flex-row items-center justify-between pb-2 p-4">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
                   Last Active
                 </CardTitle>
                 <Calendar className="w-5 h-5 text-primary" />
               </CardHeader>
-              <CardContent>
-                <div className="text-xl font-bold">{formatDate(user.lastActive)}</div>
-                <p className="text-xs text-muted-foreground">Recent activity</p>
+              <CardContent className="p-4 pt-0">
+                <div className="text-lg font-bold truncate">{formatDate(user.lastActive)}</div>
+                <p className="text-xs text-muted-foreground truncate">Recent activity</p>
               </CardContent>
             </Card>
           </div>
 
           {/* Recent Challenges */}
           <Card className="max-w-4xl mx-auto">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+            <CardHeader className="p-4 sm:p-6">
+              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
                 <Target className="w-5 h-5 text-primary" />
                 Recently Solved Challenges
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-4 sm:p-6">
               {recentChallenges.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <Target className="w-12 h-12 mx-auto mb-4 opacity-50" />
@@ -344,19 +353,21 @@ const UserProfile = () => {
                     <div 
                       key={challenge.id} 
                       className="flex items-center justify-between p-4 rounded-lg bg-muted/20 border border-border hover:bg-muted/40 cursor-pointer transition-colors"
-                      onClick={() => navigate(`/challenge/${challenge.id}`)}
+                      onClick={() => handleChallengeClick(challenge.id)}
                     >
-                      <div className="flex-1">
-                        <div className="font-medium hover:text-primary transition-colors">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium hover:text-primary transition-colors truncate">
                           {challenge.title}
                         </div>
-                        <div className="text-sm text-muted-foreground mt-1">
+                        <div className="text-sm text-muted-foreground mt-1 truncate">
                           <span className="capitalize">{challenge.category}</span>
                           <span className="mx-2">•</span>
                           Solved on {formatDate(challenge.solvedAt)}
                         </div>
                       </div>
-                      <div className="text-primary font-bold text-lg">+{challenge.points}</div>
+                      <div className="text-primary font-bold text-lg flex-shrink-0 ml-4">
+                        +{challenge.points}
+                      </div>
                     </div>
                   ))}
                 </div>
