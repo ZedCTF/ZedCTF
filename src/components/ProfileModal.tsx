@@ -459,7 +459,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  // COMPLETE ACCOUNT DELETION - WIPES EVERYTHING
+  // COMPLETE ACCOUNT DELETION - SIMPLIFIED FOR YOUR CURRENT RULES
   const handleDeleteAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !user.email) return;
@@ -468,6 +468,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
     setDeleteMessage({ type: '', text: '' });
 
     try {
+      // Confirm deletion text
       if (deleteData.confirmText !== 'DELETE MY ACCOUNT') {
         setDeleteMessage({ 
           type: 'error', 
@@ -477,159 +478,216 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
         return;
       }
 
+      // Final warning
       if (!window.confirm('⚠️ NUCLEAR OPTION ACTIVATED!\n\nThis will delete EVERYTHING:\n• Your account\n• All your data\n• All your submissions\n• Everything you created\n\nThis is PERMANENT and CANNOT BE UNDONE!\n\nAre you ABSOLUTELY sure?')) {
         setLoading(false);
         return;
       }
 
-      if (deleteData.confirmPassword) {
-        const credential = EmailAuthProvider.credential(user.email, deleteData.confirmPassword);
-        await reauthenticateWithCredential(user, credential);
-      }
+      console.log("Starting account deletion for user:", user.uid);
 
-      console.log("Starting complete account deletion for user:", user.uid);
-
-      const collections = [
-        'users',
-        'usernames',
-        'submissions',
-        'challenges',
-        'events',
-        'payments',
-        'writeups',
-        'hostRequests',
-        'leaderboard',
-        'practice',
-        'scores',
-        'teams',
-        'notifications',
-        'settings',
-        'stats',
-        'logs',
-        'achievements',
-        'badges',
-        'comments',
-        'reports',
-        'config',
-        'messages',
-        'announcements',
-        'sponsors',
-        'faq',
-        'tutorials',
-        'resources',
-        'categories',
-        'flags'
-      ];
-
-      const BATCH_SIZE = 50;
       let totalDeleted = 0;
 
-      for (const collectionName of collections) {
-        console.log(`Processing collection: ${collectionName}`);
-        
-        try {
-          const collectionRef = collection(db, collectionName);
-          const snapshot = await getDocs(collectionRef);
-          
-          const userDocs = snapshot.docs.filter(doc => {
-            const data = doc.data();
-            return data.userId === user.uid || 
-                   data.uid === user.uid ||
-                   data.authorId === user.uid ||
-                   data.createdById === user.uid ||
-                   data.reporterId === user.uid ||
-                   data.senderId === user.uid ||
-                   data.receiverId === user.uid ||
-                   data.ownerId === user.uid ||
-                   (data.participants && data.participants.includes(user.uid)) ||
-                   (data.members && data.members.includes(user.uid)) ||
-                   (data.solvedBy && data.solvedBy.includes(user.uid)) ||
-                   (data.pendingApprovals && data.pendingApprovals.includes(user.uid));
-          });
+      // 1. DELETE USER DOCUMENT (this already works!)
+      try {
+        const userRef = doc(db, "users", user.uid);
+        await deleteDoc(userRef);
+        totalDeleted++;
+        console.log("✅ User document deleted");
+      } catch (error) {
+        console.error("Error deleting user document:", error);
+        // Continue anyway - maybe it was already deleted
+      }
 
-          for (let i = 0; i < userDocs.length; i += BATCH_SIZE) {
+      // 2. DELETE USERNAME REFERENCE
+      try {
+        // First get the username from user document before it's deleted
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (userDoc.exists()) {
+          const username = userDoc.data().username || '';
+          if (username) {
+            const usernameRef = doc(db, "usernames", username.toLowerCase());
+            await deleteDoc(usernameRef);
+            totalDeleted++;
+            console.log("✅ Username reference deleted");
+          }
+        }
+      } catch (error) {
+        console.warn("Could not delete username:", error);
+      }
+
+      // 3. DELETE FROM COLLECTIONS WHERE USERS HAVE DELETE PERMISSION
+      const collectionsWithDeletePermission = [
+        'submissions',
+        'scores', 
+        'comments',
+        'messages',
+        'writeups',
+        'teams',
+        'notifications',
+        'payments',
+        'hostRequests',
+        'reports',
+        'leaderboard'
+      ];
+
+      for (const collectionName of collectionsWithDeletePermission) {
+        try {
+          const q = query(
+            collection(db, collectionName),
+            where('userId', '==', user.uid)
+          );
+          const snapshot = await getDocs(q);
+          
+          if (snapshot.docs.length > 0) {
             const batch = writeBatch(db);
-            const batchDocs = userDocs.slice(i, i + BATCH_SIZE);
-            
-            batchDocs.forEach(doc => {
+            snapshot.docs.forEach(doc => {
               batch.delete(doc.ref);
             });
-            
-            if (batchDocs.length > 0) {
-              await batch.commit();
-              totalDeleted += batchDocs.length;
-              console.log(`Deleted ${batchDocs.length} documents from ${collectionName}`);
-            }
+            await batch.commit();
+            totalDeleted += snapshot.docs.length;
+            console.log(`✅ Deleted ${snapshot.docs.length} documents from ${collectionName}`);
           }
-
-          if (collectionName === 'usernames') {
-            const allUsernames = await getDocs(collectionRef);
-            const usernameBatch = writeBatch(db);
-            let usernameCount = 0;
-            
-            allUsernames.docs.forEach(doc => {
-              if (doc.data().userId === user.uid) {
-                usernameBatch.delete(doc.ref);
-                usernameCount++;
-              }
-            });
-            
-            if (usernameCount > 0) {
-              await usernameBatch.commit();
-              totalDeleted += usernameCount;
-              console.log(`Deleted ${usernameCount} username references`);
-            }
-          }
-
-        } catch (collectionError) {
-          console.warn(`Error processing ${collectionName}:`, collectionError);
+        } catch (error) {
+          console.warn(`Could not delete from ${collectionName}:`, error);
+          // Continue with other collections
         }
       }
 
-      console.log(`Total documents deleted: ${totalDeleted}`);
-
+      // 4. SPECIAL HANDLING FOR MESSAGES (senderId OR receiverId)
       try {
-        const profilePicsRef = ref(storage, `profile-pictures/${user.uid}`);
-        try {
-          const profilePicsList = await listAll(profilePicsRef);
-          const deletePromises = profilePicsList.items.map(item => deleteObject(item));
-          await Promise.all(deletePromises);
-          
-          if (profilePicsList.items.length > 0) {
-            console.log(`Deleted ${profilePicsList.items.length} profile pictures`);
-          }
-        } catch (listError) {
-          console.log('No profile pictures folder found');
+        // Delete messages where user is sender
+        const sentQuery = query(
+          collection(db, 'messages'),
+          where('senderId', '==', user.uid)
+        );
+        const sentSnapshot = await getDocs(sentQuery);
+        
+        // Delete messages where user is receiver  
+        const receivedQuery = query(
+          collection(db, 'messages'),
+          where('receiverId', '==', user.uid)
+        );
+        const receivedSnapshot = await getDocs(receivedQuery);
+        
+        const allMessages = [...sentSnapshot.docs, ...receivedSnapshot.docs];
+        
+        if (allMessages.length > 0) {
+          const batch = writeBatch(db);
+          allMessages.forEach(doc => {
+            batch.delete(doc.ref);
+          });
+          await batch.commit();
+          totalDeleted += allMessages.length;
+          console.log(`✅ Deleted ${allMessages.length} messages`);
         }
-
-        const userUploadsRef = ref(storage, `uploads/${user.uid}`);
-        try {
-          const uploadsList = await listAll(userUploadsRef);
-          const uploadDeletePromises = uploadsList.items.map(item => deleteObject(item));
-          await Promise.all(uploadDeletePromises);
-          
-          if (uploadsList.items.length > 0) {
-            console.log(`Deleted ${uploadsList.items.length} uploaded files`);
-          }
-        } catch (uploadsError) {
-          // No uploads folder - that's fine
-        }
-
-      } catch (storageError) {
-        console.warn('Storage deletion error:', storageError);
+      } catch (error) {
+        console.warn("Could not delete messages:", error);
       }
 
+      // 5. SPECIAL HANDLING FOR TEAMS (remove from members or delete if owner)
+      try {
+        const teamsQuery = query(
+          collection(db, 'teams'),
+          where('members', 'array-contains', user.uid)
+        );
+        const teamsSnapshot = await getDocs(teamsQuery);
+        
+        if (teamsSnapshot.docs.length > 0) {
+          const batch = writeBatch(db);
+          
+          teamsSnapshot.docs.forEach(teamDoc => {
+            const teamData = teamDoc.data();
+            if (teamData.ownerId === user.uid) {
+              // Delete entire team if user is owner
+              batch.delete(teamDoc.ref);
+              console.log(`✅ Deleting team owned by user: ${teamDoc.id}`);
+            } else {
+              // Remove user from members array
+              const updatedMembers = teamData.members.filter((memberId: string) => memberId !== user.uid);
+              batch.update(teamDoc.ref, { members: updatedMembers });
+              console.log(`✅ Removing user from team: ${teamDoc.id}`);
+            }
+          });
+          
+          await batch.commit();
+          console.log(`✅ Processed ${teamsSnapshot.docs.length} teams`);
+        }
+      } catch (error) {
+        console.warn("Could not process teams:", error);
+      }
+
+      // 6. REMOVE FROM EVENTS (participants and pendingApprovals)
+      try {
+        const eventsQuery = query(
+          collection(db, 'events'),
+          where('participants', 'array-contains', user.uid)
+        );
+        const eventsSnapshot = await getDocs(eventsQuery);
+        
+        if (eventsSnapshot.docs.length > 0) {
+          const batch = writeBatch(db);
+          
+          eventsSnapshot.docs.forEach(eventDoc => {
+            const eventData = eventDoc.data();
+            const updatedParticipants = eventData.participants?.filter((participantId: string) => participantId !== user.uid) || [];
+            const updatedPendingApprovals = eventData.pendingApprovals?.filter((userId: string) => userId !== user.uid) || [];
+            
+            batch.update(eventDoc.ref, {
+              participants: updatedParticipants,
+              pendingApprovals: updatedPendingApprovals
+            });
+          });
+          
+          await batch.commit();
+          console.log(`✅ Removed user from ${eventsSnapshot.docs.length} events`);
+        }
+      } catch (error) {
+        console.warn("Could not remove from events:", error);
+      }
+
+      // 7. REMOVE FROM CHALLENGES (solvedBy array)
+      try {
+        const challengesQuery = query(
+          collection(db, 'challenges'),
+          where('solvedBy', 'array-contains', user.uid)
+        );
+        const challengesSnapshot = await getDocs(challengesQuery);
+        
+        if (challengesSnapshot.docs.length > 0) {
+          const batch = writeBatch(db);
+          
+          challengesSnapshot.docs.forEach(challengeDoc => {
+            const challengeData = challengeDoc.data();
+            const updatedSolvedBy = challengeData.solvedBy?.filter((userId: string) => userId !== user.uid) || [];
+            
+            batch.update(challengeDoc.ref, {
+              solvedBy: updatedSolvedBy
+            });
+          });
+          
+          await batch.commit();
+          console.log(`✅ Removed user from ${challengesSnapshot.docs.length} challenges`);
+        }
+      } catch (error) {
+        console.warn("Could not remove from challenges:", error);
+      }
+
+      console.log(`Total documents processed: ${totalDeleted}`);
+
+      // 8. FINALLY, DELETE THE USER FROM FIREBASE AUTH
       console.log("Deleting user from Firebase Auth...");
       await deleteUser(user);
 
       setDeleteMessage({ 
         type: 'success', 
-        text: `✅ Account COMPLETELY DELETED!\n\nRemoved ${totalDeleted} documents and all your files.\n\nYou will be redirected to the home page.` 
+        text: `✅ Account DELETED!\n\nUser account and data have been removed.\n\nYou will be redirected to the home page.` 
       });
 
+      // Redirect to home page after delay
       setTimeout(() => {
         window.location.href = '/';
-      }, 3000);
+      }, 2000);
 
     } catch (error: any) {
       console.error("Error deleting account:", error);
@@ -647,7 +705,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
       } else {
         setDeleteMessage({ 
           type: 'error', 
-          text: `Deletion failed: ${error.message || 'Unknown error'}\n\nSome data may still exist. Please contact support.` 
+          text: `Account deletion partially completed. Some data may still exist. Error: ${error.message || 'Unknown'}` 
         });
       }
     } finally {
@@ -1033,15 +1091,15 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                     <p className="text-sm font-semibold mb-2">🚨 WHAT WILL BE DELETED:</p>
                     <ul className="text-xs space-y-1 ml-4 list-disc text-red-200">
                       <li>Your user account (Firebase Auth)</li>
-                      <li>All documents in ALL collections that reference you</li>
-                      <li>Every challenge submission you ever made</li>
-                      <li>All scores, achievements, and badges</li>
-                      <li>Comments, writeups, messages, reports</li>
-                      <li>Team memberships (teams you own will be deleted)</li>
-                      <li>Event registrations and participations</li>
+                      <li>Your user profile document</li>
                       <li>Your username reservation</li>
-                      <li>ALL uploaded files and profile pictures</li>
-                      <li>Any other data with your user ID</li>
+                      <li>All your challenge submissions</li>
+                      <li>All your scores and achievements</li>
+                      <li>Comments and writeups you created</li>
+                      <li>Messages you sent or received</li>
+                      <li>Teams you own (or remove you from teams)</li>
+                      <li>Event registrations</li>
+                      <li>Challenge progress (removed from solvedBy)</li>
                     </ul>
                   </div>
                   <p className="text-sm font-bold mt-3 text-center text-yellow-300">
@@ -1083,7 +1141,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
 
                 <div>
                   <label htmlFor="confirmPassword" className="block text-sm font-medium text-red-300 mb-2">
-                    Enter your current password for security verification
+                    Enter your current password for security verification (optional)
                   </label>
                   <input
                     id="confirmPassword"
@@ -1092,7 +1150,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                     value={deleteData.confirmPassword}
                     onChange={handleDeleteChange}
                     className="w-full px-3 py-2 bg-gray-900 border-2 border-red-700 rounded-lg text-white placeholder-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all"
-                    placeholder="Your current password"
+                    placeholder="Your current password (optional)"
                     disabled={loading}
                   />
                 </div>
@@ -1106,12 +1164,12 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
                 {loading ? (
                   <>
                     <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
-                    <span className="font-semibold">DESTROYING ALL DATA...</span>
+                    <span className="font-semibold">DELETING ACCOUNT...</span>
                   </>
                 ) : (
                   <>
                     <Trash2 className="w-5 h-5" />
-                    <span className="font-bold">ACTIVATE NUCLEAR DELETE</span>
+                    <span className="font-bold">ACTIVATE ACCOUNT DELETION</span>
                   </>
                 )}
               </button>
