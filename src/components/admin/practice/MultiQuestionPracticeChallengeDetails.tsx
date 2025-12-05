@@ -82,6 +82,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
   const [questionStates, setQuestionStates] = useState<QuestionState[]>([]);
   const [activeTab, setActiveTab] = useState("description");
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
+  const [showChallengeHints, setShowChallengeHints] = useState<boolean[]>([]);
 
   useEffect(() => {
     if (challengeId) {
@@ -116,6 +117,11 @@ const MultiQuestionPracticeChallengeDetails = () => {
         submissions: []
       }));
       setQuestionStates(initialQuestionStates);
+      
+      // Initialize challenge hints visibility
+      if (challenge.hints) {
+        setShowChallengeHints(new Array(challenge.hints.length).fill(false));
+      }
     }
   }, [challenge]);
 
@@ -324,6 +330,12 @@ const MultiQuestionPracticeChallengeDetails = () => {
     }));
   };
 
+  const toggleChallengeHint = (hintIndex: number) => {
+    const newShowHints = [...showChallengeHints];
+    newShowHints[hintIndex] = !newShowHints[hintIndex];
+    setShowChallengeHints(newShowHints);
+  };
+
   const navigateToPractice = () => {
     navigate("/practice");
   };
@@ -368,6 +380,68 @@ const MultiQuestionPracticeChallengeDetails = () => {
       console.error('Error formatting date:', error);
       return 'Invalid date';
     }
+  };
+
+  // Function to render challenge content with proper formatting
+  const renderChallengeContent = () => {
+    if (!challenge?.description) return null;
+
+    const lines = challenge.description.split('\n');
+    const content = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      if (line.startsWith('n =') || line.startsWith('e =') || line.startsWith('c =')) {
+        // Handle crypto parameters with copy buttons
+        const [key, ...valueParts] = line.split('=');
+        const value = valueParts.join('=').trim();
+        
+        content.push(
+          <div key={i} className="mb-3 p-3 bg-muted/30 border rounded-lg">
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-mono font-semibold text-xs">{key}=</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => copyToClipboard(value)}
+                className="h-6 px-2"
+              >
+                <Copy className="w-3 h-3" />
+              </Button>
+            </div>
+            <div className="font-mono text-xs bg-background p-2 rounded border break-all overflow-x-auto">
+              <pre className="whitespace-pre-wrap break-words m-0">{value}</pre>
+            </div>
+          </div>
+        );
+      } else if (line.includes('=') && line.length > 50) {
+        // Handle other long key-value pairs
+        const [key, ...valueParts] = line.split('=');
+        const value = valueParts.join('=').trim();
+        
+        content.push(
+          <div key={i} className="mb-2">
+            <strong className="text-sm">{key}=</strong>
+            <div className="font-mono text-xs bg-muted/30 p-2 rounded border break-all overflow-x-auto mt-1">
+              <pre className="whitespace-pre-wrap break-words m-0">{value}</pre>
+            </div>
+          </div>
+        );
+      } else if (line) {
+        // Regular text
+        content.push(
+          <p key={i} className="mb-2 text-sm leading-relaxed break-words">
+            {line}
+          </p>
+        );
+      } else {
+        // Empty line (paragraph break)
+        content.push(<div key={i} className="mb-2" />);
+      }
+    }
+
+    return content;
   };
 
   const getDifficultyColor = (difficulty: string) => {
@@ -575,17 +649,37 @@ const MultiQuestionPracticeChallengeDetails = () => {
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    Question {activeQuestionIndex + 1}
+                    Challenge Overview
                   </button>
                   <button
-                    onClick={() => setActiveTab("hints")}
+                    onClick={() => setActiveTab("question")}
                     className={`flex-1 min-w-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
-                      activeTab === "hints" 
+                      activeTab === "question" 
                         ? "bg-background text-foreground shadow-sm" 
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    Hints ({challenge.questions?.[activeQuestionIndex]?.hints?.length || 0})
+                    Question {activeQuestionIndex + 1}
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("challengeHints")}
+                    className={`flex-1 min-w-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                      activeTab === "challengeHints" 
+                        ? "bg-background text-foreground shadow-sm" 
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Challenge Hints ({challenge.hints?.length || 0})
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("questionHints")}
+                    className={`flex-1 min-w-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                      activeTab === "questionHints" 
+                        ? "bg-background text-foreground shadow-sm" 
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Question Hints ({challenge.questions?.[activeQuestionIndex]?.hints?.length || 0})
                   </button>
                   <button
                     onClick={() => setActiveTab("files")}
@@ -601,8 +695,28 @@ const MultiQuestionPracticeChallengeDetails = () => {
 
                 {/* Tab Content */}
                 <div className="space-y-4">
-                  {/* Description Tab */}
+                  {/* Challenge Description Tab */}
                   {activeTab === "description" && (
+                    <Card className="border">
+                      <CardContent className="p-4 sm:p-6">
+                        <div className="space-y-3 break-words">
+                          <h3 className="font-bold text-lg mb-4">Challenge Description</h3>
+                          {renderChallengeContent()}
+                          
+                          {challenge.flagFormat && (
+                            <div className="p-3 bg-blue-500/10 border border-blue-200 rounded text-xs">
+                              <p className="text-blue-600 break-words">
+                                <strong>Overall Challenge Flag Format:</strong> {challenge.flagFormat}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Question Tab */}
+                  {activeTab === "question" && (
                     <Card className="border">
                       <CardContent className="p-4 sm:p-6">
                         <div className="space-y-3 break-words">
@@ -624,7 +738,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
                           {challenge.questions?.[activeQuestionIndex]?.flagFormat && (
                             <div className="p-3 bg-blue-500/10 border border-blue-200 rounded text-xs">
                               <p className="text-blue-600 break-words">
-                                <strong>Flag Format:</strong> {challenge.questions[activeQuestionIndex].flagFormat}
+                                <strong>Flag Format for Question {activeQuestionIndex + 1}:</strong> {challenge.questions[activeQuestionIndex].flagFormat}
                               </p>
                             </div>
                           )}
@@ -652,8 +766,63 @@ const MultiQuestionPracticeChallengeDetails = () => {
                     </Card>
                   )}
 
-                  {/* Hints Tab */}
-                  {activeTab === "hints" && (
+                  {/* Challenge Hints Tab */}
+                  {activeTab === "challengeHints" && (
+                    <Card className="border">
+                      <CardContent className="p-4 sm:p-6">
+                        {challenge.hints && challenge.hints.length > 0 ? (
+                          <div className="space-y-3">
+                            {challenge.hints.map((hint, index) => (
+                              <Card key={index} className="border">
+                                <CardContent className="p-3">
+                                  <div className="flex items-start gap-3">
+                                    <div className="flex-shrink-0 w-6 h-6 bg-primary/10 rounded-full flex items-center justify-center">
+                                      <Lightbulb className="w-3 h-3 text-primary" />
+                                    </div>
+                                    <div className="flex-1">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <span className="font-semibold text-sm">Challenge Hint {index + 1}</span>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => toggleChallengeHint(index)}
+                                          className="h-6 px-2 text-xs"
+                                        >
+                                          {showChallengeHints[index] ? (
+                                            <>
+                                              <EyeOff className="w-3 h-3 mr-1" />
+                                              Hide
+                                            </>
+                                          ) : (
+                                            <>
+                                              <Eye className="w-3 h-3 mr-1" />
+                                              Reveal
+                                            </>
+                                          )}
+                                        </Button>
+                                      </div>
+                                      {showChallengeHints[index] && (
+                                        <p className="text-sm text-muted-foreground bg-muted/30 p-3 rounded border break-words">
+                                          {hint}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-center py-4">
+                            <p className="text-sm text-muted-foreground">No challenge hints available.</p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Question Hints Tab */}
+                  {activeTab === "questionHints" && (
                     <Card className="border">
                       <CardContent className="p-4 sm:p-6">
                         {challenge.questions?.[activeQuestionIndex]?.hints && challenge.questions[activeQuestionIndex].hints.length > 0 ? (
@@ -667,7 +836,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
                                     </div>
                                     <div className="flex-1">
                                       <div className="flex items-center justify-between mb-2">
-                                        <span className="font-semibold text-sm">Hint {index + 1}</span>
+                                        <span className="font-semibold text-sm">Question Hint {index + 1}</span>
                                         <Button
                                           variant="ghost"
                                           size="sm"
@@ -785,7 +954,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
                 <CardHeader className="p-4 pb-2">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Flag className="w-4 h-4" />
-                    Submit Answer
+                    Submit Flag
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 pt-2 space-y-3">
@@ -805,7 +974,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
                   {!questionStates[activeQuestionIndex]?.isSolved ? (
                     <div className="space-y-2">
                       <div className="space-y-1">
-                        <Label htmlFor="flag" className="text-xs font-medium">Enter Answer for Question {activeQuestionIndex + 1}</Label>
+                        <Label htmlFor="flag" className="text-xs font-medium">Enter Flag for Question {activeQuestionIndex + 1}</Label>
                         <Input
                           id="flag"
                           placeholder={challenge.questions?.[activeQuestionIndex]?.flagFormat || "Enter flag..."}
@@ -828,8 +997,8 @@ const MultiQuestionPracticeChallengeDetails = () => {
                           </>
                         ) : (
                           <>
-                            <Flag className="w-3 h-3 mr-1" />
-                            Submit Answer
+                            <Shield className="w-3 h-3 mr-1" />
+                            Submit Flag
                           </>
                         )}
                       </Button>
