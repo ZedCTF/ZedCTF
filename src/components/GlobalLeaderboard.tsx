@@ -3,7 +3,7 @@ import { Trophy, Users, Clock, ArrowLeft, Globe, RefreshCw, ChevronLeft, Chevron
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useEffect, useState } from "react";
 import { db } from "../firebase";
-import { collection, query, orderBy, limit, onSnapshot, getDocs } from "firebase/firestore";
+import { collection, query, orderBy, limit, onSnapshot, getDocs, Timestamp } from "firebase/firestore";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 import { Badge } from "@/components/ui/badge";
@@ -19,8 +19,8 @@ export interface TopUser {
   photoURL?: string;
   role?: string;
   institution?: string;
-  lastSolvedAt?: any;
-  joinDate?: any;
+  lastSolvedAt?: Timestamp | null;
+  joinDate?: Timestamp | null;
 }
 
 const GlobalLeaderboard = () => {
@@ -50,10 +50,12 @@ const GlobalLeaderboard = () => {
       }
       
       // 2. Secondary sort: last solved timestamp (descending - most recent first)
-      const aTime = a.lastSolvedAt?.toDate ? a.lastSolvedAt.toDate().getTime() : 
-                   a.joinDate?.toDate ? a.joinDate.toDate().getTime() : 0;
-      const bTime = b.lastSolvedAt?.toDate ? b.lastSolvedAt.toDate().getTime() : 
-                   b.joinDate?.toDate ? b.joinDate.toDate().getTime() : 0;
+      const aTime = a.lastSolvedAt ? 
+                   (a.lastSolvedAt instanceof Timestamp ? a.lastSolvedAt.toMillis() : 
+                    (a.lastSolvedAt as any)?.toDate?.()?.getTime() || 0) : 0;
+      const bTime = b.lastSolvedAt ? 
+                   (b.lastSolvedAt instanceof Timestamp ? b.lastSolvedAt.toMillis() : 
+                    (b.lastSolvedAt as any)?.toDate?.()?.getTime() || 0) : 0;
       
       if (aTime !== bTime) {
         return bTime - aTime; // Most recent first
@@ -73,10 +75,12 @@ const GlobalLeaderboard = () => {
         rankedUsers.push({ ...user, rank: 1 });
       } else if (user.points === sortedUsers[index - 1].points) {
         // Same points as previous user - check if also same timestamp for true tie
-        const currentTime = user.lastSolvedAt?.toDate ? user.lastSolvedAt.toDate().getTime() : 
-                           user.joinDate?.toDate ? user.joinDate.toDate().getTime() : 0;
-        const prevTime = sortedUsers[index - 1].lastSolvedAt?.toDate ? sortedUsers[index - 1].lastSolvedAt.toDate().getTime() : 
-                        sortedUsers[index - 1].joinDate?.toDate ? sortedUsers[index - 1].joinDate.toDate().getTime() : 0;
+        const currentTime = user.lastSolvedAt ? 
+                          (user.lastSolvedAt instanceof Timestamp ? user.lastSolvedAt.toMillis() : 
+                           (user.lastSolvedAt as any)?.toDate?.()?.getTime() || 0) : 0;
+        const prevTime = sortedUsers[index - 1].lastSolvedAt ? 
+                        (sortedUsers[index - 1].lastSolvedAt instanceof Timestamp ? sortedUsers[index - 1].lastSolvedAt.toMillis() : 
+                         (sortedUsers[index - 1].lastSolvedAt as any)?.toDate?.()?.getTime() || 0) : 0;
         
         if (currentTime === prevTime) {
           // True tie - same rank as previous user
@@ -102,13 +106,13 @@ const GlobalLeaderboard = () => {
       const usersQuery = query(
         collection(db, "users"),
         orderBy("totalPoints", "desc"),
-        limit(100)
+        limit(200) // Increased limit to capture more users
       );
 
       try {
         const unsubscribeListener = onSnapshot(usersQuery, 
           (snapshot) => {
-            console.log("Real-time update received for leaderboard");
+            console.log(`Real-time update received: ${snapshot.size} users`);
             
             if (snapshot.empty) {
               console.log("No users found in database");
@@ -124,6 +128,21 @@ const GlobalLeaderboard = () => {
               const userPoints = userData.totalPoints || 0;
               const userRole = userData.role || 'user';
               
+              // IMPORTANT: Get timestamps properly for tie-breaking
+              let lastSolvedAt = null;
+              if (userData.lastSolvedAt) {
+                lastSolvedAt = userData.lastSolvedAt instanceof Timestamp ? 
+                              userData.lastSolvedAt : 
+                              (userData.lastSolvedAt?.toDate ? userData.lastSolvedAt : null);
+              }
+              
+              let joinDate = null;
+              if (userData.createdAt) {
+                joinDate = userData.createdAt instanceof Timestamp ? 
+                          userData.createdAt : 
+                          (userData.createdAt?.toDate ? userData.createdAt : null);
+              }
+              
               usersData.push({
                 rank: 0,
                 name: userData.displayName || 
@@ -136,8 +155,8 @@ const GlobalLeaderboard = () => {
                 photoURL: userData.photoURL,
                 role: userRole,
                 institution: userData.institution,
-                lastSolvedAt: userData.lastSolvedAt || userData.lastActive,
-                joinDate: userData.createdAt || userData.joinDate
+                lastSolvedAt: lastSolvedAt,
+                joinDate: joinDate
               });
             });
 
@@ -151,6 +170,7 @@ const GlobalLeaderboard = () => {
           },
           (error) => {
             console.error("Real-time listener error:", error);
+            console.error("Error code:", error.code, "Message:", error.message);
             handleOneTimeFetch();
           }
         );
@@ -177,7 +197,7 @@ const GlobalLeaderboard = () => {
       const usersQuery = query(
         collection(db, "users"),
         orderBy("totalPoints", "desc"),
-        limit(100)
+        limit(200) // Increased limit
       );
 
       const usersSnapshot = await getDocs(usersQuery);
@@ -198,6 +218,21 @@ const GlobalLeaderboard = () => {
         const userPoints = userData.totalPoints || 0;
         const userRole = userData.role || 'user';
         
+        // Get timestamps properly
+        let lastSolvedAt = null;
+        if (userData.lastSolvedAt) {
+          lastSolvedAt = userData.lastSolvedAt instanceof Timestamp ? 
+                        userData.lastSolvedAt : 
+                        (userData.lastSolvedAt?.toDate ? userData.lastSolvedAt : null);
+        }
+        
+        let joinDate = null;
+        if (userData.createdAt) {
+          joinDate = userData.createdAt instanceof Timestamp ? 
+                    userData.createdAt : 
+                    (userData.createdAt?.toDate ? userData.createdAt : null);
+        }
+        
         usersData.push({
           rank: 0,
           name: userData.displayName || 
@@ -210,8 +245,8 @@ const GlobalLeaderboard = () => {
           photoURL: userData.photoURL,
           role: userRole,
           institution: userData.institution,
-          lastSolvedAt: userData.lastSolvedAt || userData.lastActive,
-          joinDate: userData.createdAt || userData.joinDate
+          lastSolvedAt: lastSolvedAt,
+          joinDate: joinDate
         });
       });
 
@@ -629,6 +664,9 @@ const GlobalLeaderboard = () => {
                       </span>
                       <span className="block mt-1 text-primary font-medium">
                         ✓ Updates in real-time when users earn points
+                      </span>
+                      <span className="block mt-1 text-primary font-medium">
+                        ✓ Showing top 200 players
                       </span>
                     </p>
                   </div>
