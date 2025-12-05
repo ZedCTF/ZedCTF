@@ -1,4 +1,3 @@
-
 // src/components/practice/MultiQuestionPracticeChallengeDetails.tsx
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
@@ -14,7 +13,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { 
   Shield, ArrowLeft, Flag, Users, Clock, Star, FileText, Link, 
   CheckCircle, XCircle, Copy, ExternalLink, Lightbulb, Eye, EyeOff,
-  Lock
+  Lock, RefreshCw
 } from "lucide-react";
 import Navbar from "../../Navbar";
 import Footer from "../../Footer";
@@ -81,12 +80,14 @@ const MultiQuestionPracticeChallengeDetails = () => {
   const { user } = useAuthContext();
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string, questionIndex?: number } | null>(null);
   const [allSubmissions, setAllSubmissions] = useState<Submission[]>([]);
   const [questionStates, setQuestionStates] = useState<QuestionState[]>([]);
   const [activeTab, setActiveTab] = useState("description");
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const [showChallengeHints, setShowChallengeHints] = useState<boolean[]>([]);
+  const [initializingStates, setInitializingStates] = useState(true);
 
   // Check if a question is locked (solved and points awarded) FOR CURRENT USER
   const isQuestionLocked = (questionIndex: number): boolean => {
@@ -102,8 +103,9 @@ const MultiQuestionPracticeChallengeDetails = () => {
       const fetchData = async () => {
         try {
           setLoading(true);
+          setIsDataLoaded(false);
+          setInitializingStates(true);
           await fetchChallenge();
-          // We'll use real-time listener for submissions
         } catch (error) {
           console.error("Error fetching data:", error);
           setMessage({ type: 'error', text: 'Failed to load challenge data' });
@@ -129,7 +131,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
     }
   }, [challengeId]);
 
-  // Real-time listener for submissions
+  // Real-time listener for submissions with index error handling
   useEffect(() => {
     if (!user || !challengeId) {
       console.log("No user or challengeId, skipping submissions listener");
@@ -138,59 +140,102 @@ const MultiQuestionPracticeChallengeDetails = () => {
 
     console.log("Setting up real-time submissions listener for user:", user.uid, "challenge:", challengeId);
     
-    const submissionsQuery = query(
-      collection(db, "submissions"),
-      where("challengeId", "==", challengeId),
-      where("userId", "==", user.uid),
-      orderBy("submittedAt", "desc")
-    );
+    // First try with the complete query (with orderBy)
+    const tryCompleteQuery = () => {
+      const submissionsQuery = query(
+        collection(db, "submissions"),
+        where("challengeId", "==", challengeId),
+        where("userId", "==", user.uid),
+        orderBy("submittedAt", "desc")
+      );
 
-    const unsubscribe = onSnapshot(submissionsQuery, 
-      (snapshot) => {
-        const submissionsData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Submission[];
-        
-        console.log("Real-time submissions update:", submissionsData.map(s => ({
-          id: s.id,
-          flag: s.flag,
-          isCorrect: s.isCorrect,
-          pointsAwarded: s.pointsAwarded,
-          questionIndex: s.questionIndex,
-          questionId: s.questionId
-        })));
-        
-        setAllSubmissions(submissionsData);
-      }, 
-      (error) => {
-        console.error("Error in submissions listener:", error);
-      }
-    );
+      return onSnapshot(submissionsQuery, 
+        (snapshot) => {
+          const submissionsData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          })) as Submission[];
+          
+          console.log("Real-time submissions update (with orderBy):", submissionsData.length, "submissions");
+          setAllSubmissions(submissionsData);
+          setIsDataLoaded(true);
+        }, 
+        (error) => {
+          console.error("Error in submissions listener (with orderBy):", error);
+          
+          // If we get an index error, try without orderBy
+          if (error.code === 'failed-precondition' || error.message.includes('requires an index')) {
+            console.log("Index error detected, trying without orderBy...");
+            tryFallbackQuery();
+          } else {
+            setIsDataLoaded(true);
+          }
+        }
+      );
+    };
+
+    // Fallback query without orderBy (if index is missing)
+    const tryFallbackQuery = () => {
+      const fallbackQuery = query(
+        collection(db, "submissions"),
+        where("challengeId", "==", challengeId),
+        where("userId", "==", user.uid)
+      );
+
+      return onSnapshot(fallbackQuery, 
+        (snapshot) => {
+          const submissionsData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          })) as Submission[];
+          
+          // Sort manually in JavaScript
+          submissionsData.sort((a, b) => {
+            const dateA = a.submittedAt?.toDate?.() || new Date(a.submittedAt);
+            const dateB = b.submittedAt?.toDate?.() || new Date(b.submittedAt);
+            return dateB.getTime() - dateA.getTime(); // Descending
+          });
+          
+          console.log("Real-time submissions update (fallback):", submissionsData.length, "submissions");
+          setAllSubmissions(submissionsData);
+          setIsDataLoaded(true);
+        }, 
+        (error) => {
+          console.error("Error in fallback submissions listener:", error);
+          setIsDataLoaded(true);
+        }
+      );
+    };
+
+    // Start with the complete query
+    const unsubscribe = tryCompleteQuery();
     
     return () => unsubscribe();
   }, [user, challengeId]);
 
-  // Initialize question states when challenge or submissions change
+  // Initialize question states when we have all data
   useEffect(() => {
-    if (challenge?.hasMultipleQuestions && challenge.questions && allSubmissions.length >= 0) {
-      console.log("Initializing question states...");
+    if (isDataLoaded && challenge?.questions && user) {
+      console.log("All data loaded, initializing question states...");
       initializeQuestionStates();
     }
-  }, [challenge, allSubmissions]);
+  }, [isDataLoaded, challenge, user]);
 
   const initializeQuestionStates = () => {
-    if (!challenge?.questions || !user) return;
+    if (!challenge?.questions || !user) {
+      console.log("Missing data for initialization");
+      return;
+    }
     
     console.log("=== INITIALIZING QUESTION STATES ===");
     console.log("User ID:", user.uid);
-    console.log("All submissions count:", allSubmissions.length);
-    console.log("Challenge questions:", challenge.questions.map((q, idx) => ({ 
-      index: idx, 
-      id: q.id, 
-      flag: q.flag?.substring(0, 20) + "...",
-      points: q.points
-    })));
+    console.log("Total submissions:", allSubmissions.length);
+    console.log("Challenge has", challenge.questions.length, "questions");
+    
+    // Debug: Log all submissions
+    allSubmissions.forEach((sub, idx) => {
+      console.log(`Submission ${idx}: flag="${sub.flag}", correct=${sub.isCorrect}, points=${sub.pointsAwarded}, qIndex=${sub.questionIndex}, qId=${sub.questionId}`);
+    });
     
     const initialQuestionStates: QuestionState[] = challenge.questions.map((question, index) => {
       // Find ALL submissions for this user
@@ -199,37 +244,51 @@ const MultiQuestionPracticeChallengeDetails = () => {
       // Find submissions for THIS specific question
       let questionSubmissions: Submission[] = [];
       
-      // 1. First try to match by questionId (most reliable)
-      if (question.id) {
-        questionSubmissions = userSubmissions.filter(sub => sub.questionId === question.id);
-        if (questionSubmissions.length > 0) {
-          console.log(`Question ${index} matched by questionId:`, question.id);
-        }
-      }
-      
-      // 2. If no match by questionId, try to match by flag
-      if (questionSubmissions.length === 0 && question.flag) {
-        const questionFlag = question.flag.trim().toLowerCase();
-        questionSubmissions = userSubmissions.filter(sub => {
+      // Strategy 1: Match by flag (MOST RELIABLE - definitive proof)
+      const questionFlag = question.flag?.trim().toLowerCase();
+      if (questionFlag) {
+        const matchingByFlag = userSubmissions.filter(sub => {
           const submissionFlag = sub.flag?.trim().toLowerCase();
           return submissionFlag === questionFlag;
         });
-        if (questionSubmissions.length > 0) {
-          console.log(`Question ${index} matched by flag:`, questionFlag);
+        
+        if (matchingByFlag.length > 0) {
+          console.log(`Question ${index} (Q${index + 1}) matched by flag: "${questionFlag}"`, matchingByFlag.length, "submissions");
+          questionSubmissions = matchingByFlag;
         }
       }
       
-      // 3. If still no match, try by questionIndex (least reliable)
+      // Strategy 2: If no flag match, try by questionId
+      if (questionSubmissions.length === 0 && question.id) {
+        const matchingById = userSubmissions.filter(sub => sub.questionId === question.id);
+        if (matchingById.length > 0) {
+          console.log(`Question ${index} (Q${index + 1}) matched by questionId: ${question.id}`, matchingById.length, "submissions");
+          questionSubmissions = matchingById;
+        }
+      }
+      
+      // Strategy 3: If still no match, try by questionIndex (LEAST RELIABLE - only if nothing else works)
       if (questionSubmissions.length === 0) {
-        questionSubmissions = userSubmissions.filter(sub => sub.questionIndex === index);
-        if (questionSubmissions.length > 0) {
-          console.log(`Question ${index} matched by questionIndex:`, index);
+        const matchingByIndex = userSubmissions.filter(sub => sub.questionIndex === index);
+        if (matchingByIndex.length > 0) {
+          console.log(`Question ${index} (Q${index + 1}) matched by questionIndex: ${index}`, matchingByIndex.length, "submissions");
+          
+          // Additional verification: check if the flag makes sense
+          const questionFlag = question.flag?.trim().toLowerCase();
+          matchingByIndex.forEach(sub => {
+            const submissionFlag = sub.flag?.trim().toLowerCase();
+            if (questionFlag && submissionFlag && questionFlag !== submissionFlag) {
+              console.warn(`WARNING: Question ${index} flag "${questionFlag}" doesn't match submission flag "${submissionFlag}" even though index matches!`);
+            }
+          });
+          
+          questionSubmissions = matchingByIndex;
         }
       }
       
-      console.log(`Question ${index} submissions found:`, questionSubmissions.length);
+      console.log(`Question ${index} (Q${index + 1}) - flag: "${question.flag}" - found ${questionSubmissions.length} submissions`);
       
-      // Check if THIS USER has any correct submission
+      // Check if THIS USER has any correct submission for this question
       const isSolved = questionSubmissions.some(sub => sub.isCorrect);
       
       // Check if THIS USER has a correct submission that awarded points
@@ -240,7 +299,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
       const pointsEarned = correctSubmissionWithPoints?.pointsAwarded || 0;
       const userReceivedPoints = pointsEarned > 0;
       
-      console.log(`Question ${index} status:`, {
+      console.log(`Question ${index} (Q${index + 1}) status:`, {
         isSolved, 
         pointsEarned, 
         userReceivedPoints, 
@@ -261,14 +320,13 @@ const MultiQuestionPracticeChallengeDetails = () => {
       };
     });
     
-    console.log("Final question states:", initialQuestionStates.map(q => ({
-      index: q.index,
-      isSolved: q.isSolved,
-      pointsEarned: q.pointsEarned,
-      userReceivedPoints: q.userReceivedPoints
-    })));
+    console.log("=== FINAL QUESTION STATES ===");
+    initialQuestionStates.forEach((state, index) => {
+      console.log(`Q${index + 1}: Solved=${state.isSolved}, Points=${state.pointsEarned}, Locked=${state.isSolved && state.userReceivedPoints}`);
+    });
     
     setQuestionStates(initialQuestionStates);
+    setInitializingStates(false);
     
     // Initialize challenge hints visibility
     if (challenge.hints) {
@@ -317,9 +375,8 @@ const MultiQuestionPracticeChallengeDetails = () => {
       return;
     }
 
-    // Debug logging
     console.log("=== SUBMITTING FLAG ===");
-    console.log("Question index:", questionIndex);
+    console.log("Question:", questionIndex + 1);
     console.log("Question ID:", challenge.questions?.[questionIndex]?.id);
     console.log("User flag:", flagInput);
     console.log("Expected flag:", challenge.questions?.[questionIndex]?.flag);
@@ -355,18 +412,18 @@ const MultiQuestionPracticeChallengeDetails = () => {
         const existingCorrectSubmissionWithPoints = allSubmissions.find(sub => {
           if (sub.userId !== user.uid) return false;
           
-          // Check by questionId first
-          if (sub.questionId && sub.questionId === question.id) {
-            return sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0;
-          }
-          
-          // Check by flag match
+          // First check by flag match (most reliable)
           const submissionFlag = sub.flag?.trim().toLowerCase();
           if (questionFlag && submissionFlag === questionFlag) {
             return sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0;
           }
           
-          // Check by questionIndex
+          // Then check by questionId
+          if (sub.questionId && sub.questionId === question.id) {
+            return sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0;
+          }
+          
+          // Finally check by questionIndex
           if (sub.questionIndex === questionIndex) {
             return sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0;
           }
@@ -387,7 +444,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
         }
       }
 
-      // Record submission
+      // Record submission - IMPORTANT: Use the CORRECT questionIndex
       const submissionData: any = {
         challengeId: challenge.id,
         challengeTitle: challenge.title,
@@ -399,12 +456,12 @@ const MultiQuestionPracticeChallengeDetails = () => {
         pointsAwarded: pointsToAward,
         points: pointsToAward,
         username: user.displayName || user.email?.split('@')[0] || 'User',
-        questionIndex: questionIndex, // CRITICAL: Ensure correct index
+        questionIndex: questionIndex, // THIS MUST BE THE CORRECT INDEX
         questionId: question.id,
         questionPoints: question.points
       };
 
-      console.log("Creating submission with:", submissionData);
+      console.log("Creating submission with correct questionIndex:", submissionData.questionIndex);
 
       const submissionRef = await addDoc(collection(db, "submissions"), submissionData);
 
@@ -438,7 +495,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
           questionIndex
         });
         
-        // Clear input for this question and mark as solved for THIS USER
+        // Update local state immediately
         setQuestionStates(prev => prev.map((q, idx) => 
           idx === questionIndex ? { 
             ...q, 
@@ -450,7 +507,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
           } : q
         ));
         
-        // The real-time listener will automatically update allSubmissions
+        // The real-time listener will update allSubmissions automatically
         
       } else {
         console.log("Flag is incorrect");
@@ -517,6 +574,31 @@ const MultiQuestionPracticeChallengeDetails = () => {
     navigator.clipboard.writeText(text);
   };
 
+  // Debug function
+  const debugState = () => {
+    console.log("=== DEBUG STATE ===");
+    console.log("User:", user?.uid);
+    console.log("Challenge ID:", challengeId);
+    console.log("All submissions count:", allSubmissions.length);
+    
+    if (challenge?.questions) {
+      console.log("Question flags:");
+      challenge.questions.forEach((q, i) => {
+        console.log(`  Q${i + 1}: "${q.flag}" (ID: ${q.id})`);
+      });
+    }
+    
+    console.log("Question states:");
+    questionStates.forEach((state, index) => {
+      console.log(`  Q${index + 1}: Solved=${state.isSolved}, Points=${state.pointsEarned}, Locked=${state.isSolved && state.userReceivedPoints}, Submissions=${state.submissions.length}`);
+      if (state.submissions.length > 0) {
+        state.submissions.forEach(sub => {
+          console.log(`    - Flag: "${sub.flag}", Correct: ${sub.isCorrect}, Points: ${sub.pointsAwarded}, QIndex: ${sub.questionIndex}, QId: ${sub.questionId}`);
+        });
+      }
+    });
+  };
+
   // Calculate progress for multi-question challenges FOR CURRENT USER
   const questionProgress = challenge?.hasMultipleQuestions 
     ? {
@@ -577,7 +659,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
     return colors[category] || "bg-gray-500/20 text-gray-600 border-gray-200";
   };
 
-  if (loading) {
+  if (loading || initializingStates) {
     return (
       <>
         <Navbar />
@@ -585,7 +667,9 @@ const MultiQuestionPracticeChallengeDetails = () => {
           <div className="container mx-auto px-4 py-6">
             <div className="text-center py-8">
               <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto"></div>
-              <p className="mt-2 text-sm text-muted-foreground">Loading multi-question challenge...</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {loading ? "Loading multi-question challenge..." : "Initializing question states..."}
+              </p>
             </div>
           </div>
         </div>
@@ -654,6 +738,16 @@ const MultiQuestionPracticeChallengeDetails = () => {
                   Featured
                 </Badge>
               )}
+              {/* Debug button - optional */}
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={debugState}
+                className="h-7 w-7 p-0"
+                title="Debug State"
+              >
+                <RefreshCw className="w-3 h-3" />
+              </Button>
             </div>
           </div>
 
