@@ -14,7 +14,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { X, Plus, Upload, Link, FileText, User, ExternalLink, Save, Star, Shield, Lock, AlertCircle, Trash2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { 
+  X, Plus, Upload, Link, FileText, User, ExternalLink, Save, Star, 
+  Shield, Lock, AlertCircle, Trash2, Eye, EyeOff, Lightbulb, Flag 
+} from "lucide-react";
 
 interface ChallengeEditProps {
   challengeId: string;
@@ -27,6 +31,9 @@ interface Question {
   question: string;
   points: number;
   flag: string;
+  flagFormat?: string;
+  hints?: string[];
+  files?: FileAttachment[];
 }
 
 interface FileAttachment {
@@ -64,7 +71,7 @@ interface ChallengeData {
   availableInPractice: boolean;
   challengeType: 'practice' | 'live' | 'past_event';
   externalSource: ExternalSource;
-  createdById: string; // Add createdById to track ownership
+  createdById: string;
 }
 
 const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
@@ -75,6 +82,7 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
   const [uploadingFiles, setUploadingFiles] = useState<Set<string>>(new Set());
   const [accessDenied, setAccessDenied] = useState(false);
   const [challengeOwner, setChallengeOwner] = useState<string>("");
+  const [activeTab, setActiveTab] = useState("basic");
   
   const [formData, setFormData] = useState<ChallengeData>({
     title: "",
@@ -112,7 +120,7 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
   const canEditChallenge = (): boolean => {
     if (!user) return false;
     if (isAdmin) return true;
-    if (isModerator) return true;  // Moderators can edit any challenge
+    if (isModerator) return true;
     if (challengeOwner && challengeOwner === user.uid) return true;
     return false;
   };
@@ -205,7 +213,16 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
 
         // Set questions if it's a multi-question challenge
         if (challengeData.hasMultipleQuestions && challengeData.questions) {
-          setQuestions(challengeData.questions);
+          const loadedQuestions: Question[] = challengeData.questions.map((q: any, index: number) => ({
+            id: q.id || `question-${index}`,
+            question: q.question || "",
+            points: q.points || 0,
+            flag: q.flag || "",
+            flagFormat: q.flagFormat || "",
+            hints: q.hints || [],
+            files: q.files || []
+          }));
+          setQuestions(loadedQuestions);
         }
 
         // Show custom category if it exists
@@ -282,7 +299,15 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
 
       // Add questions if multi-question challenge
       if (formData.hasMultipleQuestions) {
-        updateData.questions = questions;
+        updateData.questions = questions.map(q => ({
+          id: q.id,
+          question: q.question,
+          points: q.points,
+          flag: q.flag,
+          flagFormat: q.flagFormat,
+          hints: q.hints?.filter(h => h.trim() !== "") || [],
+          files: q.files || []
+        }));
       }
 
       // Add creator information if provided
@@ -348,7 +373,7 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
     }
   };
 
-  // Helper functions
+  // Helper functions for form management
   const addHint = () => {
     setFormData({
       ...formData,
@@ -367,17 +392,21 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
     setFormData({ ...formData, hints: newHints });
   };
 
+  // Question management functions
   const addQuestion = () => {
     const newQuestion: Question = {
       id: Date.now().toString(),
       question: "",
       points: 0,
-      flag: ""
+      flag: "",
+      flagFormat: "",
+      hints: [],
+      files: []
     };
     setQuestions([...questions, newQuestion]);
   };
 
-  const updateQuestion = (id: string, field: keyof Question, value: string | number) => {
+  const updateQuestion = (id: string, field: keyof Question, value: any) => {
     setQuestions(questions.map(q => 
       q.id === id ? { ...q, [field]: value } : q
     ));
@@ -389,7 +418,138 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
     }
   };
 
-  const addFileAttachment = async (type: 'file' | 'link') => {
+  // Question hint management
+  const addQuestionHint = (questionId: string) => {
+    setQuestions(questions.map(q => 
+      q.id === questionId ? { 
+        ...q, 
+        hints: [...(q.hints || []), ""] 
+      } : q
+    ));
+  };
+
+  const updateQuestionHint = (questionId: string, hintIndex: number, value: string) => {
+    setQuestions(questions.map(q => {
+      if (q.id === questionId) {
+        const newHints = [...(q.hints || [])];
+        newHints[hintIndex] = value;
+        return { ...q, hints: newHints };
+      }
+      return q;
+    }));
+  };
+
+  const removeQuestionHint = (questionId: string, hintIndex: number) => {
+    setQuestions(questions.map(q => {
+      if (q.id === questionId) {
+        const newHints = (q.hints || []).filter((_, i) => i !== hintIndex);
+        return { ...q, hints: newHints };
+      }
+      return q;
+    }));
+  };
+
+  // Question file management
+  const addQuestionFile = async (questionId: string, type: 'file' | 'link') => {
+    if (type === 'link') {
+      const url = prompt("Enter the URL:");
+      if (url) {
+        try {
+          new URL(url);
+        } catch {
+          alert("Please enter a valid URL");
+          return;
+        }
+
+        const newFile: FileAttachment = {
+          id: Date.now().toString(),
+          name: `Link - ${new Date().toLocaleDateString()}`,
+          url: url,
+          type: 'link'
+        };
+        
+        setQuestions(questions.map(q => 
+          q.id === questionId ? { 
+            ...q, 
+            files: [...(q.files || []), newFile] 
+          } : q
+        ));
+      }
+    } else {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = ".zip,.txt,.pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.py,.js,.html,.css,.xml,.json";
+      
+      input.onchange = async (e) => {
+        const files = (e.target as HTMLInputElement).files;
+        if (files && files.length > 0) {
+          for (const file of Array.from(files)) {
+            const fileId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+            
+            setUploadingFiles(prev => new Set(prev).add(fileId));
+            
+            try {
+              const tempFile: FileAttachment = {
+                id: fileId,
+                name: file.name,
+                url: "uploading...",
+                type: 'file'
+              };
+              
+              setQuestions(questions.map(q => 
+                q.id === questionId ? { 
+                  ...q, 
+                  files: [...(q.files || []), tempFile] 
+                } : q
+              ));
+
+              const fileUrl = await uploadFileToStorage(file);
+              
+              setQuestions(questions.map(q => 
+                q.id === questionId ? { 
+                  ...q, 
+                  files: (q.files || []).map(f => 
+                    f.id === fileId ? { ...f, url: fileUrl } : f
+                  )
+                } : q
+              ));
+              
+            } catch (error) {
+              console.error(`Error uploading file ${file.name}:`, error);
+              alert(`Failed to upload ${file.name}. Please try again.`);
+              
+              setQuestions(questions.map(q => 
+                q.id === questionId ? { 
+                  ...q, 
+                  files: (q.files || []).filter(f => f.id !== fileId)
+                } : q
+              ));
+            } finally {
+              setUploadingFiles(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(fileId);
+                return newSet;
+              });
+            }
+          }
+        }
+      };
+      input.click();
+    }
+  };
+
+  const removeQuestionFile = (questionId: string, fileId: string) => {
+    setQuestions(questions.map(q => 
+      q.id === questionId ? { 
+        ...q, 
+        files: (q.files || []).filter(f => f.id !== fileId)
+      } : q
+    ));
+  };
+
+  // Challenge file management (for overall challenge files)
+  const addChallengeFile = async (type: 'file' | 'link') => {
     if (type === 'link') {
       const url = prompt("Enter the URL:");
       if (url) {
@@ -469,7 +629,7 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
     }
   };
 
-  const removeFile = (id: string) => {
+  const removeChallengeFile = (id: string) => {
     setFormData({
       ...formData,
       files: formData.files.filter(file => file.id !== id)
@@ -575,516 +735,688 @@ const ChallengeEdit = ({ challengeId, onBack, onSave }: ChallengeEditProps) => {
             />
           </div>
 
-          {/* Practice Visibility */}
-          <div className="space-y-4 p-4 border rounded-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Shield className="w-5 h-5" />
-                <Label className="text-base">Practice Visibility</Label>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="availableInPractice"
-                  checked={formData.availableInPractice}
-                  onCheckedChange={(checked) => setFormData({...formData, availableInPractice: checked})}
-                />
-                <Label htmlFor="availableInPractice" className="text-sm">
-                  Available in Practice
-                </Label>
-              </div>
+          {/* Tabs for different sections */}
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="grid grid-cols-4">
+              <TabsTrigger value="basic">Basic Info</TabsTrigger>
+              <TabsTrigger value="questions" disabled={!formData.hasMultipleQuestions}>
+                Questions ({questions.length})
+              </TabsTrigger>
+              <TabsTrigger value="hints">Hints</TabsTrigger>
+              <TabsTrigger value="files">Files & Links</TabsTrigger>
+            </TabsList>
 
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="featuredOnPractice"
-                  checked={formData.featuredOnPractice}
-                  onCheckedChange={(checked) => setFormData({...formData, featuredOnPractice: checked})}
-                />
-                <Label htmlFor="featuredOnPractice" className="text-sm">
-                  <Star className="w-4 h-4 inline mr-1" />
-                  Featured on Practice
-                </Label>
-              </div>
-            </div>
-            
-            <div>
-              <Label htmlFor="challengeType">Challenge Type</Label>
-              <Select 
-                value={formData.challengeType} 
-                onValueChange={(value: 'practice' | 'live' | 'past_event') => setFormData({...formData, challengeType: value})}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="practice">Practice Challenge</SelectItem>
-                  <SelectItem value="live">Live Event Challenge</SelectItem>
-                  <SelectItem value="past_event">Past Event Challenge</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">
-                "Practice" challenges appear in the Practice section. "Live Event" challenges are only available during events.
-              </p>
-            </div>
-          </div>
-
-          {/* Basic Information */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="title">Challenge Title *</Label>
-                <Input
-                  id="title"
-                  value={formData.title}
-                  onChange={(e) => setFormData({...formData, title: e.target.value})}
-                  placeholder="Enter challenge title"
-                  required
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="category">Category</Label>
-                <Select value={formData.category} onValueChange={handleCategoryChange}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="web">Web</SelectItem>
-                    <SelectItem value="crypto">Cryptography</SelectItem>
-                    <SelectItem value="forensics">Forensics</SelectItem>
-                    <SelectItem value="pwn">Pwn</SelectItem>
-                    <SelectItem value="reversing">Reverse Engineering</SelectItem>
-                    <SelectItem value="misc">Miscellaneous</SelectItem>
-                    <SelectItem value="custom">Custom Category</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {showCustomCategory && (
-                <div>
-                  <Label htmlFor="customCategory">Custom Category Name *</Label>
-                  <Input
-                    id="customCategory"
-                    value={formData.customCategory}
-                    onChange={(e) => setFormData({...formData, customCategory: e.target.value})}
-                    placeholder="Enter your custom category name"
-                    required
-                  />
-                </div>
-              )}
-
-              <div>
+            {/* Basic Information Tab */}
+            <TabsContent value="basic" className="space-y-6">
+              {/* Practice Visibility */}
+              <div className="space-y-4 p-4 border rounded-lg">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="difficulty">Difficulty</Label>
-                  {formData.hasMultipleQuestions && (
-                    <Badge variant="outline" className="text-xs">
-                      {totalPoints} total points
-                    </Badge>
-                  )}
+                  <div className="flex items-center space-x-2">
+                    <Shield className="w-5 h-5" />
+                    <Label className="text-base">Practice Visibility</Label>
+                  </div>
                 </div>
-                <Select value={formData.difficulty} onValueChange={(value) => setFormData({...formData, difficulty: value})}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="easy">
-                      Easy {formData.hasMultipleQuestions ? "(1-100 total points)" : "(1-100 points)"}
-                    </SelectItem>
-                    <SelectItem value="medium">
-                      Medium {formData.hasMultipleQuestions ? "(101-300 total points)" : "(101-300 points)"}
-                    </SelectItem>
-                    <SelectItem value="hard">
-                      Hard {formData.hasMultipleQuestions ? "(301-500 total points)" : "(301-500 points)"}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {getDifficultyDescription()}
-                </p>
-              </div>
-
-              {!formData.hasMultipleQuestions && (
-                <div>
-                  <Label htmlFor="points">Points *</Label>
-                  <Input
-                    id="points"
-                    type="number"
-                    value={formData.points}
-                    onChange={(e) => setFormData({...formData, points: parseInt(e.target.value) || 0})}
-                    min="1"
-                    max="1000"
-                    required
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="description">Description *</Label>
-                <Textarea
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) => setFormData({...formData, description: e.target.value})}
-                  placeholder="Enter detailed challenge description, requirements, and any setup instructions..."
-                  rows={8}
-                  required
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Creator Information */}
-          <div className="space-y-4 p-4 border rounded-lg">
-            <div className="flex items-center space-x-2">
-              <User className="w-5 h-5" />
-              <Label className="text-base">Creator Information</Label>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="creator">Original Creator (Optional)</Label>
-                <Input
-                  id="creator"
-                  value={formData.creator}
-                  onChange={(e) => setFormData({...formData, creator: e.target.value})}
-                  placeholder="Name of the original challenge creator"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Use this if the challenge was created by someone else in your community
-                </p>
-              </div>
-
-              <div>
-                <Label htmlFor="creatorUrl">Creator Profile URL</Label>
-                <Input
-                  id="creatorUrl"
-                  value={formData.creatorUrl}
-                  onChange={(e) => setFormData({...formData, creatorUrl: e.target.value})}
-                  placeholder="https://github.com/username"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* External Challenge Attribution */}
-          <div className="space-y-4 p-4 border rounded-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <ExternalLink className="w-5 h-5" />
-                <Label className="text-base">External CTF Challenge</Label>
-              </div>
-              <Switch
-                checked={formData.isExternalChallenge}
-                onCheckedChange={(checked) => setFormData({...formData, isExternalChallenge: checked})}
-              />
-            </div>
-            
-            {formData.isExternalChallenge && (
-              <div className="space-y-4 mt-4">
-                <p className="text-sm text-muted-foreground">
-                  Provide attribution for challenges downloaded from other CTF platforms
-                </p>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="ctfName">Original CTF Name *</Label>
-                    <Input
-                      id="ctfName"
-                      value={formData.externalSource.ctfName}
-                      onChange={(e) => updateExternalSource('ctfName', e.target.value)}
-                      placeholder="e.g., HackTheBox, TryHackMe, CTFtime"
-                      required
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="availableInPractice"
+                      checked={formData.availableInPractice}
+                      onCheckedChange={(checked) => setFormData({...formData, availableInPractice: checked})}
                     />
+                    <Label htmlFor="availableInPractice" className="text-sm">
+                      Available in Practice
+                    </Label>
                   </div>
 
-                  <div>
-                    <Label htmlFor="ctfUrl">CTF Website URL</Label>
-                    <Input
-                      id="ctfUrl"
-                      value={formData.externalSource.ctfUrl}
-                      onChange={(e) => updateExternalSource('ctfUrl', e.target.value)}
-                      placeholder="https://ctf.example.com"
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="featuredOnPractice"
+                      checked={formData.featuredOnPractice}
+                      onCheckedChange={(checked) => setFormData({...formData, featuredOnPractice: checked})}
                     />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="originalAuthor">Original Author *</Label>
-                    <Input
-                      id="originalAuthor"
-                      value={formData.externalSource.originalAuthor}
-                      onChange={(e) => updateExternalSource('originalAuthor', e.target.value)}
-                      placeholder="Name of the original challenge author"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="authorUrl">Author Profile URL</Label>
-                    <Input
-                      id="authorUrl"
-                      value={formData.externalSource.authorUrl}
-                      onChange={(e) => updateExternalSource('authorUrl', e.target.value)}
-                      placeholder="https://github.com/original-author"
-                    />
+                    <Label htmlFor="featuredOnPractice" className="text-sm">
+                      <Star className="w-4 h-4 inline mr-1" />
+                      Featured on Practice
+                    </Label>
                   </div>
                 </div>
-
+                
                 <div>
-                  <Label htmlFor="license">License</Label>
+                  <Label htmlFor="challengeType">Challenge Type</Label>
                   <Select 
-                    value={formData.externalSource.license} 
-                    onValueChange={(value) => updateExternalSource('license', value)}
+                    value={formData.challengeType} 
+                    onValueChange={(value: 'practice' | 'live' | 'past_event') => setFormData({...formData, challengeType: value})}
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="unknown">Unknown</SelectItem>
-                      <SelectItem value="MIT">MIT License</SelectItem>
-                      <SelectItem value="apache-2.0">Apache 2.0</SelectItem>
-                      <SelectItem value="gpl-3.0">GPL v3.0</SelectItem>
-                      <SelectItem value="cc-by-4.0">Creative Commons BY 4.0</SelectItem>
-                      <SelectItem value="custom">Custom License</SelectItem>
+                      <SelectItem value="practice">Practice Challenge</SelectItem>
+                      <SelectItem value="live">Live Event Challenge</SelectItem>
+                      <SelectItem value="past_event">Past Event Challenge</SelectItem>
                     </SelectContent>
                   </Select>
-                  
-                  {formData.externalSource.license === "custom" && (
-                    <Input
-                      placeholder="Specify custom license"
-                      className="mt-2"
-                      onChange={(e) => updateExternalSource('license', e.target.value)}
-                    />
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Multiple Questions Toggle */}
-          <div className="flex items-center justify-between p-4 border rounded-lg">
-            <div>
-              <Label htmlFor="multipleQuestions" className="text-base">Multiple Questions Challenge</Label>
-              <p className="text-sm text-muted-foreground">
-                Enable if this challenge contains multiple sub-questions with separate flags
-              </p>
-            </div>
-            <Switch
-              id="multipleQuestions"
-              checked={formData.hasMultipleQuestions}
-              onCheckedChange={(checked) => setFormData({...formData, hasMultipleQuestions: checked})}
-            />
-          </div>
-
-          {/* Multiple Questions Section */}
-          {formData.hasMultipleQuestions && (
-            <div className="space-y-4 p-4 border rounded-lg">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-base">Challenge Questions</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Total Points: <strong>{totalPoints}</strong> | Questions: {questions.length}
+                  <p className="text-xs text-muted-foreground mt-1">
+                    "Practice" challenges appear in the Practice section. "Live Event" challenges are only available during events.
                   </p>
                 </div>
-                <Button type="button" onClick={addQuestion} variant="outline" size="sm">
-                  <Plus className="w-4 h-4 mr-1" />
-                  Add Question
-                </Button>
               </div>
-              
-              {questions.map((question, index) => (
-                <div key={question.id} className="p-4 border rounded-lg space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label>Question {index + 1}</Label>
-                    {questions.length > 1 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeQuestion(question.id)}
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                    )}
-                  </div>
-                  
+
+              {/* Challenge Configuration */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
                   <div>
-                    <Label htmlFor={`question-${question.id}`}>Question Text *</Label>
+                    <Label htmlFor="title">Challenge Title *</Label>
                     <Input
-                      id={`question-${question.id}`}
-                      value={question.question}
-                      onChange={(e) => updateQuestion(question.id, 'question', e.target.value)}
-                      placeholder="Enter the question text"
+                      id="title"
+                      value={formData.title}
+                      onChange={(e) => setFormData({...formData, title: e.target.value})}
+                      placeholder="Enter challenge title"
                       required
                     />
                   </div>
-                  
-                  <div className="grid grid-cols-2 gap-3">
+
+                  <div>
+                    <Label htmlFor="category">Category</Label>
+                    <Select value={formData.category} onValueChange={handleCategoryChange}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="web">Web</SelectItem>
+                        <SelectItem value="crypto">Cryptography</SelectItem>
+                        <SelectItem value="forensics">Forensics</SelectItem>
+                        <SelectItem value="pwn">Pwn</SelectItem>
+                        <SelectItem value="reversing">Reverse Engineering</SelectItem>
+                        <SelectItem value="misc">Miscellaneous</SelectItem>
+                        <SelectItem value="custom">Custom Category</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {showCustomCategory && (
                     <div>
-                      <Label htmlFor={`points-${question.id}`}>Points *</Label>
+                      <Label htmlFor="customCategory">Custom Category Name *</Label>
                       <Input
-                        id={`points-${question.id}`}
+                        id="customCategory"
+                        value={formData.customCategory}
+                        onChange={(e) => setFormData({...formData, customCategory: e.target.value})}
+                        placeholder="Enter your custom category name"
+                        required
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="difficulty">Difficulty</Label>
+                      {formData.hasMultipleQuestions && (
+                        <Badge variant="outline" className="text-xs">
+                          {totalPoints} total points
+                        </Badge>
+                      )}
+                    </div>
+                    <Select value={formData.difficulty} onValueChange={(value) => setFormData({...formData, difficulty: value})}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="easy">
+                          Easy {formData.hasMultipleQuestions ? "(1-100 total points)" : "(1-100 points)"}
+                        </SelectItem>
+                        <SelectItem value="medium">
+                          Medium {formData.hasMultipleQuestions ? "(101-300 total points)" : "(101-300 points)"}
+                        </SelectItem>
+                        <SelectItem value="hard">
+                          Hard {formData.hasMultipleQuestions ? "(301-500 total points)" : "(301-500 points)"}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {getDifficultyDescription()}
+                    </p>
+                  </div>
+
+                  {/* Multiple Questions Toggle */}
+                  <div className="flex items-center justify-between p-4 border rounded-lg">
+                    <div>
+                      <Label htmlFor="multipleQuestions" className="text-base">Multiple Questions Challenge</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Enable if this challenge contains multiple sub-questions with separate flags
+                      </p>
+                    </div>
+                    <Switch
+                      id="multipleQuestions"
+                      checked={formData.hasMultipleQuestions}
+                      onCheckedChange={(checked) => setFormData({...formData, hasMultipleQuestions: checked})}
+                    />
+                  </div>
+
+                  {!formData.hasMultipleQuestions && (
+                    <div>
+                      <Label htmlFor="points">Points *</Label>
+                      <Input
+                        id="points"
                         type="number"
-                        value={question.points}
-                        onChange={(e) => updateQuestion(question.id, 'points', parseInt(e.target.value) || 0)}
+                        value={formData.points}
+                        onChange={(e) => setFormData({...formData, points: parseInt(e.target.value) || 0})}
                         min="1"
+                        max="1000"
+                        required
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="description">Description *</Label>
+                    <Textarea
+                      id="description"
+                      value={formData.description}
+                      onChange={(e) => setFormData({...formData, description: e.target.value})}
+                      placeholder="Enter detailed challenge description, requirements, and any setup instructions..."
+                      rows={12}
+                      required
+                    />
+                  </div>
+
+                  {/* Single Flag Section */}
+                  {!formData.hasMultipleQuestions && (
+                    <div className="grid grid-cols-1 gap-4">
+                      <div>
+                        <Label htmlFor="flag">Flag *</Label>
+                        <Input
+                          id="flag"
+                          value={formData.flag}
+                          onChange={(e) => setFormData({...formData, flag: e.target.value})}
+                          placeholder="CTF{...} or any flag format"
+                          required
+                        />
+                      </div>
+                      
+                      <div>
+                        <Label htmlFor="flagFormat">Flag Format (Regex)</Label>
+                        <Select 
+                          value={formData.flagFormat} 
+                          onValueChange={(value) => setFormData({...formData, flagFormat: value})}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="CTF{.*}">CTF{`{text}`}</SelectItem>
+                            <SelectItem value="FLAG{.*}">FLAG{`{text}`}</SelectItem>
+                            <SelectItem value=".*">Any format</SelectItem>
+                            <SelectItem value="[A-Za-z0-9]{8,}">Alphanumeric (8+ chars)</SelectItem>
+                            <SelectItem value="custom">Custom Regex</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        
+                        {formData.flagFormat === "custom" && (
+                          <Input
+                            placeholder="Enter custom regex pattern"
+                            className="mt-2"
+                            onChange={(e) => setFormData({...formData, flagFormat: e.target.value})}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Creator Information */}
+              <div className="space-y-4 p-4 border rounded-lg">
+                <div className="flex items-center space-x-2">
+                  <User className="w-5 h-5" />
+                  <Label className="text-base">Creator Information</Label>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="creator">Original Creator (Optional)</Label>
+                    <Input
+                      id="creator"
+                      value={formData.creator}
+                      onChange={(e) => setFormData({...formData, creator: e.target.value})}
+                      placeholder="Name of the original challenge creator"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Use this if the challenge was created by someone else in your community
+                    </p>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="creatorUrl">Creator Profile URL</Label>
+                    <Input
+                      id="creatorUrl"
+                      value={formData.creatorUrl}
+                      onChange={(e) => setFormData({...formData, creatorUrl: e.target.value})}
+                      placeholder="https://github.com/username"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* External Challenge Attribution */}
+              <div className="space-y-4 p-4 border rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <ExternalLink className="w-5 h-5" />
+                    <Label className="text-base">External CTF Challenge</Label>
+                  </div>
+                  <Switch
+                    checked={formData.isExternalChallenge}
+                    onCheckedChange={(checked) => setFormData({...formData, isExternalChallenge: checked})}
+                  />
+                </div>
+                
+                {formData.isExternalChallenge && (
+                  <div className="space-y-4 mt-4">
+                    <p className="text-sm text-muted-foreground">
+                      Provide attribution for challenges downloaded from other CTF platforms
+                    </p>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="ctfName">Original CTF Name *</Label>
+                        <Input
+                          id="ctfName"
+                          value={formData.externalSource.ctfName}
+                          onChange={(e) => updateExternalSource('ctfName', e.target.value)}
+                          placeholder="e.g., HackTheBox, TryHackMe, CTFtime"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor="ctfUrl">CTF Website URL</Label>
+                        <Input
+                          id="ctfUrl"
+                          value={formData.externalSource.ctfUrl}
+                          onChange={(e) => updateExternalSource('ctfUrl', e.target.value)}
+                          placeholder="https://ctf.example.com"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="originalAuthor">Original Author *</Label>
+                        <Input
+                          id="originalAuthor"
+                          value={formData.externalSource.originalAuthor}
+                          onChange={(e) => updateExternalSource('originalAuthor', e.target.value)}
+                          placeholder="Name of the original challenge author"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor="authorUrl">Author Profile URL</Label>
+                        <Input
+                          id="authorUrl"
+                          value={formData.externalSource.authorUrl}
+                          onChange={(e) => updateExternalSource('authorUrl', e.target.value)}
+                          placeholder="https://github.com/original-author"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label htmlFor="license">License</Label>
+                      <Select 
+                        value={formData.externalSource.license} 
+                        onValueChange={(value) => updateExternalSource('license', value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="unknown">Unknown</SelectItem>
+                          <SelectItem value="MIT">MIT License</SelectItem>
+                          <SelectItem value="apache-2.0">Apache 2.0</SelectItem>
+                          <SelectItem value="gpl-3.0">GPL v3.0</SelectItem>
+                          <SelectItem value="cc-by-4.0">Creative Commons BY 4.0</SelectItem>
+                          <SelectItem value="custom">Custom License</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      
+                      {formData.externalSource.license === "custom" && (
+                        <Input
+                          placeholder="Specify custom license"
+                          className="mt-2"
+                          onChange={(e) => updateExternalSource('license', e.target.value)}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
+            {/* Questions Tab */}
+            <TabsContent value="questions" className="space-y-6">
+              <div className="space-y-4 p-4 border rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-base">Questions Configuration</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Total Points: <strong>{totalPoints}</strong> | Questions: {questions.length}
+                    </p>
+                  </div>
+                  <Button type="button" onClick={addQuestion} variant="outline" size="sm">
+                    <Plus className="w-4 h-4 mr-1" />
+                    Add Question
+                  </Button>
+                </div>
+                
+                {questions.map((question, index) => (
+                  <div key={question.id} className="p-4 border rounded-lg space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Label className="text-base">Question {index + 1}</Label>
+                        <Badge variant="outline" className="font-mono">
+                          {question.points} pts
+                        </Badge>
+                      </div>
+                      {questions.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeQuestion(question.id)}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
+                    
+                    <div>
+                      <Label htmlFor={`question-${question.id}`}>Question Text *</Label>
+                      <Textarea
+                        id={`question-${question.id}`}
+                        value={question.question}
+                        onChange={(e) => updateQuestion(question.id, 'question', e.target.value)}
+                        placeholder="Enter the question text"
+                        rows={3}
                         required
                       />
                     </div>
                     
-                    <div>
-                      <Label htmlFor={`flag-${question.id}`}>Flag *</Label>
-                      <Input
-                        id={`flag-${question.id}`}
-                        value={question.flag}
-                        onChange={(e) => updateQuestion(question.id, 'flag', e.target.value)}
-                        placeholder="Flag for this question"
-                        required
-                      />
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <Label htmlFor={`points-${question.id}`}>Points *</Label>
+                        <Input
+                          id={`points-${question.id}`}
+                          type="number"
+                          value={question.points}
+                          onChange={(e) => updateQuestion(question.id, 'points', parseInt(e.target.value) || 0)}
+                          min="1"
+                          required
+                        />
+                      </div>
+                      
+                      <div>
+                        <Label htmlFor={`flag-${question.id}`}>Flag *</Label>
+                        <Input
+                          id={`flag-${question.id}`}
+                          value={question.flag}
+                          onChange={(e) => updateQuestion(question.id, 'flag', e.target.value)}
+                          placeholder="Flag for this question"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor={`flagFormat-${question.id}`}>Flag Format (Optional)</Label>
+                        <Input
+                          id={`flagFormat-${question.id}`}
+                          value={question.flagFormat || ""}
+                          onChange={(e) => updateQuestion(question.id, 'flagFormat', e.target.value)}
+                          placeholder="e.g., user_name, fl4g{...}"
+                        />
+                      </div>
                     </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
 
-          {/* Single Flag Section */}
-          {!formData.hasMultipleQuestions && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <Label htmlFor="flag">Flag *</Label>
-                <Input
-                  id="flag"
-                  value={formData.flag}
-                  onChange={(e) => setFormData({...formData, flag: e.target.value})}
-                  placeholder="CTF{...} or any flag format"
-                  required
-                />
-              </div>
-              
-              <div>
-                <Label htmlFor="flagFormat">Flag Format (Regex)</Label>
-                <Select 
-                  value={formData.flagFormat} 
-                  onValueChange={(value) => setFormData({...formData, flagFormat: value})}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="CTF{.*}">CTF{`{text}`}</SelectItem>
-                    <SelectItem value="FLAG{.*}">FLAG{`{text}`}</SelectItem>
-                    <SelectItem value=".*">Any format</SelectItem>
-                    <SelectItem value="[A-Za-z0-9]{8,}">Alphanumeric (8+ chars)</SelectItem>
-                    <SelectItem value="custom">Custom Regex</SelectItem>
-                  </SelectContent>
-                </Select>
-                
-                {formData.flagFormat === "custom" && (
-                  <Input
-                    placeholder="Enter custom regex pattern"
-                    className="mt-2"
-                    onChange={(e) => setFormData({...formData, flagFormat: e.target.value})}
-                  />
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* File Attachments */}
-          <div className="space-y-4">
-            <Label>Files & Links</Label>
-            <div className="flex gap-2">
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={() => addFileAttachment('file')}
-                disabled={uploadingFiles.size > 0}
-              >
-                <Upload className="w-4 h-4 mr-2" />
-                Upload File
-              </Button>
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={() => addFileAttachment('link')}
-              >
-                <Link className="w-4 h-4 mr-2" />
-                Add Link
-              </Button>
-            </div>
-            
-            {uploadingFiles.size > 0 && (
-              <div className="text-sm text-muted-foreground">
-                Uploading {uploadingFiles.size} file(s)... Please wait.
-              </div>
-            )}
-            
-            {formData.files.length > 0 && (
-              <div className="space-y-2">
-                {formData.files.map((file) => (
-                  <div key={file.id} className="flex items-center justify-between p-3 border rounded">
-                    <div className="flex items-center space-x-2">
-                      {file.type === 'file' ? <FileText className="w-4 h-4" /> : <Link className="w-4 h-4" />}
-                      <span className="text-sm">{file.name}</span>
-                      {file.type === 'link' ? (
-                        <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-xs">
-                          (View Link)
-                        </a>
-                      ) : file.url === "uploading..." ? (
-                        <span className="text-xs text-orange-600">(Uploading...)</span>
+                    {/* Question Hints Section */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm font-medium">Question Hints</Label>
+                        <Button 
+                          type="button" 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => addQuestionHint(question.id)}
+                        >
+                          <Plus className="w-3 h-3 mr-1" />
+                          Add Hint
+                        </Button>
+                      </div>
+                      
+                      {question.hints && question.hints.length > 0 ? (
+                        <div className="space-y-2">
+                          {question.hints.map((hint, hintIndex) => (
+                            <div key={hintIndex} className="flex gap-2">
+                              <div className="flex-1 flex items-center gap-2">
+                                <div className="w-6 h-6 bg-primary/10 rounded-full flex items-center justify-center">
+                                  <Lightbulb className="w-3 h-3 text-primary" />
+                                </div>
+                                <Input
+                                  value={hint}
+                                  onChange={(e) => updateQuestionHint(question.id, hintIndex, e.target.value)}
+                                  placeholder={`Hint ${hintIndex + 1}`}
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => removeQuestionHint(question.id, hintIndex)}
+                              >
+                                <X className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
                       ) : (
-                        <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-xs">
-                          (Download)
-                        </a>
+                        <p className="text-sm text-muted-foreground">No hints added for this question.</p>
                       )}
                     </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeFile(file.id)}
-                      disabled={file.url === "uploading..."}
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
+
+                    {/* Question Files Section */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm font-medium">Question Files</Label>
+                        <div className="flex gap-2">
+                          <Button 
+                            type="button" 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => addQuestionFile(question.id, 'file')}
+                            disabled={uploadingFiles.size > 0}
+                          >
+                            <Upload className="w-3 h-3 mr-1" />
+                            Upload
+                          </Button>
+                          <Button 
+                            type="button" 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => addQuestionFile(question.id, 'link')}
+                          >
+                            <Link className="w-3 h-3 mr-1" />
+                            Add Link
+                          </Button>
+                        </div>
+                      </div>
+                      
+                      {question.files && question.files.length > 0 ? (
+                        <div className="space-y-2">
+                          {question.files.map((file) => (
+                            <div key={file.id} className="flex items-center justify-between p-2 border rounded">
+                              <div className="flex items-center space-x-2">
+                                {file.type === 'file' ? <FileText className="w-4 h-4" /> : <Link className="w-4 h-4" />}
+                                <span className="text-sm">{file.name}</span>
+                                {file.type === 'link' ? (
+                                  <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-xs">
+                                    (View Link)
+                                  </a>
+                                ) : file.url === "uploading..." ? (
+                                  <span className="text-xs text-orange-600">(Uploading...)</span>
+                                ) : (
+                                  <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-xs">
+                                    (Download)
+                                  </a>
+                                )}
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => removeQuestionFile(question.id, file.id)}
+                                disabled={file.url === "uploading..."}
+                              >
+                                <X className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No files added for this question.</p>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
-            )}
-          </div>
+            </TabsContent>
 
-          {/* Hints Section */}
-          <div>
-            <Label>Hints (Optional)</Label>
-            <div className="space-y-2 mt-2">
-              {formData.hints.map((hint, index) => (
-                <div key={index} className="flex gap-2">
-                  <Input
-                    value={hint}
-                    onChange={(e) => updateHint(index, e.target.value)}
-                    placeholder={`Hint ${index + 1}`}
-                  />
-                  {formData.hints.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => removeHint(index)}
-                    >
-                      Remove
-                    </Button>
-                  )}
+            {/* Hints Tab */}
+            <TabsContent value="hints" className="space-y-6">
+              <div className="space-y-4 p-4 border rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Lightbulb className="w-5 h-5" />
+                    <Label className="text-base">Challenge Hints</Label>
+                  </div>
+                  <Button type="button" onClick={addHint} variant="outline" size="sm">
+                    <Plus className="w-4 h-4 mr-1" />
+                    Add Hint
+                  </Button>
                 </div>
-              ))}
-              <Button type="button" variant="outline" onClick={addHint}>
-                Add Hint
-              </Button>
-            </div>
-          </div>
+                
+                <p className="text-sm text-muted-foreground">
+                  Add hints that apply to the entire challenge. For per-question hints, add them in the Questions tab.
+                </p>
+                
+                <div className="space-y-3">
+                  {formData.hints.map((hint, index) => (
+                    <div key={index} className="flex gap-2">
+                      <div className="flex-1 flex items-center gap-2">
+                        <div className="w-6 h-6 bg-primary/10 rounded-full flex items-center justify-center">
+                          <Lightbulb className="w-4 h-4 text-primary" />
+                        </div>
+                        <Input
+                          value={hint}
+                          onChange={(e) => updateHint(index, e.target.value)}
+                          placeholder={`Hint ${index + 1}`}
+                        />
+                      </div>
+                      {formData.hints.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => removeHint(index)}
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Files Tab */}
+            <TabsContent value="files" className="space-y-6">
+              <div className="space-y-4 p-4 border rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <FileText className="w-5 h-5" />
+                    <Label className="text-base">Challenge Files</Label>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => addChallengeFile('file')}
+                      disabled={uploadingFiles.size > 0}
+                    >
+                      <Upload className="w-4 h-4 mr-2" />
+                      Upload File
+                    </Button>
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => addChallengeFile('link')}
+                    >
+                      <Link className="w-4 h-4 mr-2" />
+                      Add Link
+                    </Button>
+                  </div>
+                </div>
+                
+                <p className="text-sm text-muted-foreground">
+                  Add files or links that apply to the entire challenge. For per-question files, add them in the Questions tab.
+                </p>
+                
+                {uploadingFiles.size > 0 && (
+                  <div className="text-sm text-muted-foreground">
+                    Uploading {uploadingFiles.size} file(s)... Please wait.
+                  </div>
+                )}
+                
+                {formData.files.length > 0 ? (
+                  <div className="space-y-2">
+                    {formData.files.map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-3 border rounded">
+                        <div className="flex items-center space-x-2">
+                          {file.type === 'file' ? <FileText className="w-4 h-4" /> : <Link className="w-4 h-4" />}
+                          <span className="text-sm">{file.name}</span>
+                          {file.type === 'link' ? (
+                            <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-xs">
+                              (View Link)
+                            </a>
+                          ) : file.url === "uploading..." ? (
+                            <span className="text-xs text-orange-600">(Uploading...)</span>
+                          ) : (
+                            <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-xs">
+                              (Download)
+                            </a>
+                          )}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeChallengeFile(file.id)}
+                          disabled={file.url === "uploading..."}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No files or links added for this challenge.</p>
+                )}
+              </div>
+            </TabsContent>
+          </Tabs>
 
           {/* Action Buttons */}
           <div className="flex gap-2 pt-4">
