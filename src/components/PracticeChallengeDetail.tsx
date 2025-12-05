@@ -53,6 +53,8 @@ interface Submission {
   isCorrect: boolean;
   submittedAt: any;
   pointsAwarded?: number;
+  questionId?: string;
+  questionIndex?: number;
 }
 
 const PracticeChallengeDetails = () => {
@@ -67,6 +69,8 @@ const PracticeChallengeDetails = () => {
   const [showHints, setShowHints] = useState<boolean[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [activeTab, setActiveTab] = useState("description");
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [solvedQuestions, setSolvedQuestions] = useState<string[]>([]);
 
   useEffect(() => {
     if (challengeId) {
@@ -138,6 +142,16 @@ const PracticeChallengeDetails = () => {
       })) as Submission[];
 
       setSubmissions(submissionsData);
+      
+      // Extract solved question IDs for multi-question challenges
+      if (challenge?.hasMultipleQuestions) {
+        const solvedQuestionIds = submissionsData
+          .filter(sub => sub.isCorrect && sub.questionId)
+          .map(sub => sub.questionId)
+          .filter(Boolean) as string[];
+        
+        setSolvedQuestions(solvedQuestionIds);
+      }
     } catch (error) {
       console.error("Error fetching submissions:", error);
     }
@@ -170,6 +184,8 @@ const PracticeChallengeDetails = () => {
 
     try {
       let isCorrect = false;
+      let matchedQuestionId = null;
+      let questionPoints = 0;
       
       // Check if it's a multi-question challenge
       if (challenge.hasMultipleQuestions && challenge.questions) {
@@ -177,19 +193,26 @@ const PracticeChallengeDetails = () => {
         const matchedQuestion = challenge.questions.find(q => 
           q.flag && q.flag.trim() === flagInput.trim()
         );
+        
         isCorrect = !!matchedQuestion;
+        if (matchedQuestion) {
+          matchedQuestionId = matchedQuestion.id;
+          questionPoints = matchedQuestion.points || 0;
+        }
       } else {
         // For single flag challenges
         isCorrect = challenge.flag?.trim() === flagInput.trim();
       }
 
-      // Check if user has already solved this challenge and received points
-      const alreadySolvedWithPoints = await hasUserSolvedAndReceivedPoints(user.uid, challenge.id);
+      // Check if user has already solved this specific question (for multi-question)
+      const alreadySolved = matchedQuestionId 
+        ? solvedQuestions.includes(matchedQuestionId)
+        : await hasUserSolvedAndReceivedPoints(user.uid, challenge.id);
       
-      // Determine points to award (0 if already solved, full points if first time)
+      // Determine points to award
       let pointsToAward = 0;
-      if (isCorrect && !alreadySolvedWithPoints) {
-        pointsToAward = challenge.points || 0;
+      if (isCorrect && !alreadySolved) {
+        pointsToAward = matchedQuestionId ? questionPoints : (challenge.points || 0);
       }
 
       // Record submission
@@ -202,18 +225,31 @@ const PracticeChallengeDetails = () => {
         isCorrect: isCorrect,
         submittedAt: new Date(),
         pointsAwarded: pointsToAward,
-        points: pointsToAward, // Also include as 'points' for compatibility
+        points: pointsToAward,
         username: user.displayName || user.email?.split('@')[0] || 'User'
       };
+
+      // Add question-specific data for multi-question challenges
+      if (matchedQuestionId) {
+        submissionData.questionId = matchedQuestionId;
+        submissionData.questionIndex = challenge.questions?.findIndex(q => q.id === matchedQuestionId);
+      }
 
       await addDoc(collection(db, "submissions"), submissionData);
 
       if (isCorrect) {
-        // Update challenge solvedBy array if not already included
-        if (!challenge.solvedBy?.includes(user.uid)) {
-          await updateDoc(doc(db, "challenges", challenge.id), {
-            solvedBy: arrayUnion(user.uid)
-          });
+        if (matchedQuestionId) {
+          // Update solved questions state
+          if (!solvedQuestions.includes(matchedQuestionId)) {
+            setSolvedQuestions([...solvedQuestions, matchedQuestionId]);
+          }
+        } else {
+          // Update challenge solvedBy array for single-question challenge
+          if (!challenge.solvedBy?.includes(user.uid)) {
+            await updateDoc(doc(db, "challenges", challenge.id), {
+              solvedBy: arrayUnion(user.uid)
+            });
+          }
         }
 
         // Update user's total points if this is their first solve
@@ -228,7 +264,7 @@ const PracticeChallengeDetails = () => {
           type: 'success', 
           text: pointsToAward > 0 
             ? `Congratulations! Flag is correct! +${pointsToAward} points awarded!`
-            : 'Congratulations! Flag is correct! (No additional points - already solved)'
+            : 'Congratulations! Flag is correct! (Already solved)'
         });
         setFlagInput("");
         
@@ -261,6 +297,10 @@ const PracticeChallengeDetails = () => {
   };
 
   const isSolved = challenge?.solvedBy?.includes(user?.uid || '');
+  
+  // For multi-question challenges, check if all questions are solved
+  const isAllQuestionsSolved = challenge?.hasMultipleQuestions && 
+    challenge.questions?.every(q => solvedQuestions.includes(q.id));
 
   // Function to format date properly
   const formatDate = (date: any) => {
@@ -351,6 +391,22 @@ const PracticeChallengeDetails = () => {
   // Calculate if user received points for this solve
   const userReceivedPoints = submissions.some(sub => sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0);
 
+  // Calculate total points earned for multi-question challenges
+  const totalPointsEarned = challenge?.hasMultipleQuestions 
+    ? submissions
+        .filter(sub => sub.isCorrect && sub.pointsAwarded)
+        .reduce((sum, sub) => sum + (sub.pointsAwarded || 0), 0)
+    : (userReceivedPoints ? (challenge?.points || 0) : 0);
+
+  // Calculate progress for multi-question challenges
+  const questionProgress = challenge?.hasMultipleQuestions 
+    ? {
+        solved: solvedQuestions.length,
+        total: challenge.questions?.length || 0,
+        percentage: challenge.questions ? (solvedQuestions.length / challenge.questions.length) * 100 : 0
+      }
+    : null;
+
   if (loading) {
     return (
       <>
@@ -438,10 +494,16 @@ const PracticeChallengeDetails = () => {
             </div>
             
             <div className="flex items-center gap-2 flex-wrap">
-              {isSolved && (
+              {isSolved && !challenge.hasMultipleQuestions && (
                 <Badge className="bg-green-500/20 text-green-600 border-green-200 text-xs">
                   <CheckCircle className="w-3 h-3 mr-1" />
                   {userReceivedPoints ? 'Solved + Points' : 'Solved'}
+                </Badge>
+              )}
+              {challenge.hasMultipleQuestions && questionProgress && (
+                <Badge className="bg-blue-500/20 text-blue-600 border-blue-200 text-xs">
+                  <CheckCircle className="w-3 h-3 mr-1" />
+                  {questionProgress.solved}/{questionProgress.total} Solved
                 </Badge>
               )}
               {challenge.featuredOnPractice && (
@@ -466,6 +528,11 @@ const PracticeChallengeDetails = () => {
                 <Badge variant="outline" className="font-mono font-semibold text-xs">
                   {challenge.totalPoints || challenge.points} pts
                 </Badge>
+                {challenge.hasMultipleQuestions && questionProgress && (
+                  <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-600">
+                    {totalPointsEarned}/{challenge.totalPoints || challenge.points} pts earned
+                  </Badge>
+                )}
                 <div className="flex items-center gap-1 text-muted-foreground">
                   <Users className="w-3 h-3" />
                   <span>{challenge.solvedBy?.length || 0} solves</span>
@@ -550,21 +617,93 @@ const PracticeChallengeDetails = () => {
                         <div className="space-y-3">
                           {challenge.hasMultipleQuestions && challenge.questions ? (
                             <div className="space-y-3">
-                              <h3 className="text-lg font-semibold">Questions</h3>
-                              {challenge.questions.map((question, index) => (
-                                <div key={question.id} className="border rounded p-3">
-                                  <h4 className="font-semibold text-sm mb-1">Question {index + 1}</h4>
-                                  <p className="mb-2 text-xs text-muted-foreground break-words">{question.question}</p>
-                                  <div className="flex items-center justify-between text-xs">
-                                    <span className="font-mono font-semibold">{question.points} points</span>
-                                    {challenge.solvedBy?.includes(user?.uid || '') && (
+                              <div className="flex items-center justify-between">
+                                <h3 className="text-lg font-semibold">Questions</h3>
+                                {questionProgress && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {questionProgress.solved}/{questionProgress.total} Solved
+                                  </Badge>
+                                )}
+                              </div>
+                              {challenge.questions.map((question, index) => {
+                                const isQuestionSolved = solvedQuestions.includes(question.id);
+                                
+                                return (
+                                  <div key={question.id} className="border rounded p-3">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <h4 className="font-semibold text-sm">Question {index + 1}</h4>
                                       <Badge variant="outline" className="font-mono text-xs">
-                                        Flag: {question.flag}
+                                        {question.points} points
                                       </Badge>
+                                    </div>
+                                    <p className="mb-3 text-sm text-muted-foreground break-words">{question.question}</p>
+                                    
+                                    {question.flagFormat && (
+                                      <div className="mb-2 p-2 bg-blue-500/10 border border-blue-200 rounded text-xs">
+                                        <p className="text-blue-600 break-words">
+                                          <strong>Flag Format:</strong> {question.flagFormat}
+                                        </p>
+                                      </div>
+                                    )}
+                                    
+                                    {isQuestionSolved ? (
+                                      <div className="p-2 bg-green-500/10 border border-green-200 rounded">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-xs text-green-600 font-semibold">✓ Solved</span>
+                                          <div className="flex items-center gap-2">
+                                            <Badge variant="outline" className="font-mono text-xs">
+                                              Flag: {question.flag}
+                                            </Badge>
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => copyToClipboard(question.flag)}
+                                              className="h-6 px-2"
+                                            >
+                                              <Copy className="w-3 h-3" />
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-2">
+                                        <div className="space-y-1">
+                                          <Label htmlFor={`flag-${index}`} className="text-xs">Answer for Question {index + 1}</Label>
+                                          <Input
+                                            id={`flag-${index}`}
+                                            placeholder={question.flagFormat || "Enter flag..."}
+                                            value={currentQuestionIndex === index ? flagInput : ''}
+                                            onChange={(e) => {
+                                              setFlagInput(e.target.value);
+                                              setCurrentQuestionIndex(index);
+                                            }}
+                                            onKeyPress={(e) => e.key === 'Enter' && submitFlag()}
+                                            className="font-mono text-sm h-8"
+                                          />
+                                        </div>
+                                        <Button 
+                                          onClick={submitFlag}
+                                          disabled={submitting || !flagInput.trim() || currentQuestionIndex !== index}
+                                          className="w-full h-8 text-xs"
+                                          variant="terminal"
+                                        >
+                                          {submitting && currentQuestionIndex === index ? (
+                                            <>
+                                              <div className="animate-spin w-3 h-3 border border-white border-t-transparent rounded-full mr-2"></div>
+                                              Checking...
+                                            </>
+                                          ) : (
+                                            <>
+                                              <Flag className="w-3 h-3 mr-1" />
+                                              Submit Answer
+                                            </>
+                                          )}
+                                        </Button>
+                                      </div>
                                     )}
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           ) : (
                             <div className="space-y-3 break-words">
@@ -685,74 +824,114 @@ const PracticeChallengeDetails = () => {
 
             {/* Sidebar - Full width on mobile, sticky on desktop */}
             <div className="space-y-4">
-              {/* Flag Submission - Mobile optimized */}
-              <Card className="border lg:sticky lg:top-4">
-                <CardHeader className="p-4 pb-2">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Flag className="w-4 h-4" />
-                    Submit Flag
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-4 pt-2 space-y-3">
-                  {message && (
-                    <Alert className={`text-sm ${message.type === 'success' ? 'bg-green-500/10 border-green-200' : 'bg-red-500/10 border-red-200'}`}>
-                      {message.type === 'success' ? (
-                        <CheckCircle className="w-4 h-4 text-green-600" />
-                      ) : (
-                        <XCircle className="w-4 h-4 text-red-600" />
-                      )}
-                      <AlertDescription className={message.type === 'success' ? 'text-green-600' : 'text-red-600'}>
-                        {message.text}
-                      </AlertDescription>
-                    </Alert>
-                  )}
+              {/* Flag Submission - Only show for single-question challenges */}
+              {!challenge.hasMultipleQuestions && (
+                <Card className="border lg:sticky lg:top-4">
+                  <CardHeader className="p-4 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Flag className="w-4 h-4" />
+                      Submit Flag
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-4 pt-2 space-y-3">
+                    {message && (
+                      <Alert className={`text-sm ${message.type === 'success' ? 'bg-green-500/10 border-green-200' : 'bg-red-500/10 border-red-200'}`}>
+                        {message.type === 'success' ? (
+                          <CheckCircle className="w-4 h-4 text-green-600" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-red-600" />
+                        )}
+                        <AlertDescription className={message.type === 'success' ? 'text-green-600' : 'text-red-600'}>
+                          {message.text}
+                        </AlertDescription>
+                      </Alert>
+                    )}
 
-                  {!isSolved ? (
+                    {!isSolved ? (
+                      <div className="space-y-2">
+                        <div className="space-y-1">
+                          <Label htmlFor="flag" className="text-xs font-medium">Enter Flag</Label>
+                          <Input
+                            id="flag"
+                            placeholder="CTF{...} or flag content"
+                            value={flagInput}
+                            onChange={(e) => setFlagInput(e.target.value)}
+                            onKeyPress={(e) => e.key === 'Enter' && submitFlag()}
+                            className="font-mono text-sm h-9"
+                          />
+                        </div>
+                        <Button 
+                          onClick={submitFlag} 
+                          disabled={submitting || !flagInput.trim()}
+                          className="w-full h-9"
+                          variant="terminal"
+                        >
+                          {submitting ? (
+                            <>
+                              <div className="animate-spin w-3 h-3 border border-white border-t-transparent rounded-full mr-2"></div>
+                              Checking...
+                            </>
+                          ) : (
+                            <>
+                              <Shield className="w-3 h-3 mr-1" />
+                              Submit Flag
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="text-center p-3 bg-green-500/10 border border-green-200 rounded">
+                        <CheckCircle className="w-8 h-8 text-green-600 mx-auto mb-1" />
+                        <p className="text-green-600 font-semibold text-sm">Challenge Solved!</p>
+                        <p className="text-green-600 text-xs mt-1">
+                          {userReceivedPoints 
+                            ? `+${challenge.totalPoints || challenge.points} points awarded`
+                            : 'Already solved - no additional points'
+                          }
+                        </p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Progress Summary for Multi-Question Challenges */}
+              {challenge.hasMultipleQuestions && questionProgress && (
+                <Card className="border lg:sticky lg:top-4">
+                  <CardHeader className="p-4 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <CheckCircle className="w-4 h-4" />
+                      Progress Summary
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-4 pt-2 space-y-3">
                     <div className="space-y-2">
-                      <div className="space-y-1">
-                        <Label htmlFor="flag" className="text-xs font-medium">Enter Flag</Label>
-                        <Input
-                          id="flag"
-                          placeholder="CTF{...} or flag content"
-                          value={flagInput}
-                          onChange={(e) => setFlagInput(e.target.value)}
-                          onKeyPress={(e) => e.key === 'Enter' && submitFlag()}
-                          className="font-mono text-sm h-9"
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Questions Solved</span>
+                        <span className="font-semibold">{questionProgress.solved}/{questionProgress.total}</span>
+                      </div>
+                      <div className="w-full bg-muted rounded-full h-2">
+                        <div 
+                          className="bg-green-500 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${questionProgress.percentage}%` }}
                         />
                       </div>
-                      <Button 
-                        onClick={submitFlag} 
-                        disabled={submitting || !flagInput.trim()}
-                        className="w-full h-9"
-                        variant="terminal"
-                      >
-                        {submitting ? (
-                          <>
-                            <div className="animate-spin w-3 h-3 border border-white border-t-transparent rounded-full mr-2"></div>
-                            Checking...
-                          </>
-                        ) : (
-                          <>
-                            <Shield className="w-3 h-3 mr-1" />
-                            Submit Flag
-                          </>
-                        )}
-                      </Button>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Points Earned</span>
+                        <span className="font-semibold">{totalPointsEarned}/{challenge.totalPoints || challenge.points}</span>
+                      </div>
+                      {isAllQuestionsSolved && (
+                        <div className="text-center p-2 bg-green-500/10 border border-green-200 rounded">
+                          <p className="text-green-600 font-semibold text-xs">All Questions Solved! 🎉</p>
+                          <p className="text-green-600 text-xs mt-1">
+                            Total: +{totalPointsEarned} points
+                          </p>
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="text-center p-3 bg-green-500/10 border border-green-200 rounded">
-                      <CheckCircle className="w-8 h-8 text-green-600 mx-auto mb-1" />
-                      <p className="text-green-600 font-semibold text-sm">Challenge Solved!</p>
-                      <p className="text-green-600 text-xs mt-1">
-                        {userReceivedPoints 
-                          ? `+${challenge.totalPoints || challenge.points} points awarded`
-                          : 'Already solved - no additional points'
-                        }
-                      </p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Submission History - Mobile optimized */}
               {submissions.length > 0 && (
@@ -770,7 +949,12 @@ const PracticeChallengeDetails = () => {
                             ) : (
                               <XCircle className="w-3 h-3 text-red-600 flex-shrink-0" />
                             )}
-                            <code className="truncate font-mono text-xs">{submission.flag}</code>
+                            <div className="min-w-0 flex-1">
+                              <code className="truncate font-mono text-xs block">{submission.flag}</code>
+                              {submission.questionIndex !== undefined && (
+                                <span className="text-xs text-muted-foreground">Q{submission.questionIndex + 1}</span>
+                              )}
+                            </div>
                             {submission.pointsAwarded && submission.pointsAwarded > 0 && (
                               <Badge variant="outline" className="ml-1 text-xs bg-green-500/10 text-green-600">
                                 +{submission.pointsAwarded}
