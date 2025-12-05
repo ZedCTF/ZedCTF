@@ -1,19 +1,21 @@
-// src/components/practice/PracticeChallengeDetails.tsx
+// src/components/practice/MultiQuestionPracticeChallengeDetails.tsx
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { doc, getDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, arrayUnion, increment, onSnapshot } from "firebase/firestore";
-import { db } from "../firebase";
-import { useAuthContext } from "../contexts/AuthContext";
+import { db } from "../../../firebase";
+import { useAuthContext } from "../../../contexts/AuthContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Shield, ArrowLeft, Flag, Users, Clock, Star, FileText, Link, Eye, EyeOff, CheckCircle, XCircle, Copy, ExternalLink, Lightbulb } from "lucide-react";
-import Navbar from "./Navbar";
-import Footer from "./Footer";
+import { 
+  Shield, ArrowLeft, Flag, Users, Clock, Star, FileText, Link, 
+  CheckCircle, XCircle, Copy, ExternalLink, Lightbulb, Eye, EyeOff 
+} from "lucide-react";
+import Navbar from "../../Navbar";
+import Footer from "../../Footer";
 
 interface Challenge {
   id: string;
@@ -54,27 +56,38 @@ interface Submission {
   isCorrect: boolean;
   submittedAt: any;
   pointsAwarded?: number;
+  questionIndex?: number;
+  questionId?: string;
+  questionPoints?: number;
 }
 
-const PracticeChallengeDetails = () => {
+interface QuestionState {
+  index: number;
+  flagInput: string;
+  isSubmitting: boolean;
+  showHints: boolean[];
+  isSolved: boolean;
+  pointsEarned: number;
+  submissions: Submission[];
+}
+
+const MultiQuestionPracticeChallengeDetails = () => {
   const { challengeId } = useParams<{ challengeId: string }>();
   const navigate = useNavigate();
   const { user } = useAuthContext();
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [flagInput, setFlagInput] = useState("");
-  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
-  const [showHints, setShowHints] = useState<boolean[]>([]);
-  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string, questionIndex?: number } | null>(null);
+  const [allSubmissions, setAllSubmissions] = useState<Submission[]>([]);
+  const [questionStates, setQuestionStates] = useState<QuestionState[]>([]);
   const [activeTab, setActiveTab] = useState("description");
+  const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
 
   useEffect(() => {
     if (challengeId) {
       fetchChallenge();
       fetchSubmissions();
       
-      // Real-time listener for challenge updates (solves count)
       const challengeRef = doc(db, "challenges", challengeId);
       const unsubscribe = onSnapshot(challengeRef, (doc) => {
         if (doc.exists()) {
@@ -90,6 +103,22 @@ const PracticeChallengeDetails = () => {
     }
   }, [challengeId]);
 
+  useEffect(() => {
+    // Initialize question states when challenge loads
+    if (challenge?.hasMultipleQuestions && challenge.questions) {
+      const initialQuestionStates: QuestionState[] = challenge.questions.map((_, index) => ({
+        index,
+        flagInput: "",
+        isSubmitting: false,
+        showHints: new Array(challenge.questions?.[index]?.hints?.length || 0).fill(false),
+        isSolved: false,
+        pointsEarned: 0,
+        submissions: []
+      }));
+      setQuestionStates(initialQuestionStates);
+    }
+  }, [challenge]);
+
   const fetchChallenge = async () => {
     try {
       setLoading(true);
@@ -102,11 +131,6 @@ const PracticeChallengeDetails = () => {
           ...challengeDoc.data()
         } as Challenge;
         setChallenge(challengeData);
-        
-        // Initialize hints visibility
-        if (challengeData.hints) {
-          setShowHints(new Array(challengeData.hints.length).fill(false));
-        }
       } else {
         setMessage({ type: 'error', text: 'Challenge not found' });
       }
@@ -135,55 +159,75 @@ const PracticeChallengeDetails = () => {
         ...doc.data()
       })) as Submission[];
 
-      setSubmissions(submissionsData);
+      setAllSubmissions(submissionsData);
+      
+      // Update question states with their submissions
+      if (challenge?.hasMultipleQuestions && challenge.questions) {
+        setQuestionStates(prev => prev.map((qState, index) => {
+          const question = challenge.questions?.[index];
+          const questionSubmissions = submissionsData.filter(sub => 
+            (sub.questionIndex === index) || 
+            (sub.questionId === question?.id) ||
+            (sub.flag === question?.flag)
+          );
+          
+          const isSolved = questionSubmissions.some(sub => sub.isCorrect);
+          const pointsEarned = questionSubmissions
+            .filter(sub => sub.isCorrect && sub.pointsAwarded)
+            .reduce((sum, sub) => sum + (sub.pointsAwarded || 0), 0);
+          
+          return {
+            ...qState,
+            isSolved,
+            pointsEarned,
+            submissions: questionSubmissions
+          };
+        }));
+      }
     } catch (error) {
       console.error("Error fetching submissions:", error);
     }
   };
 
-  // Check if user has already solved this challenge and received points
-  const hasUserSolvedAndReceivedPoints = async (userId: string, challengeId: string): Promise<boolean> => {
-    try {
-      const submissionsQuery = query(
-        collection(db, "submissions"),
-        where("challengeId", "==", challengeId),
-        where("userId", "==", userId),
-        where("isCorrect", "==", true),
-        where("pointsAwarded", ">", 0)
-      );
-
-      const submissionsSnapshot = await getDocs(submissionsQuery);
-      return !submissionsSnapshot.empty;
-    } catch (error) {
-      console.error("Error checking user solve status:", error);
-      return false;
-    }
-  };
-
-  const submitFlag = async () => {
-    if (!challenge || !user || !flagInput.trim()) return;
-
-    // Check if this is a multi-question challenge - redirect to multi-question component
-    if (challenge.hasMultipleQuestions) {
-      // This should be handled by routing, but just in case
-      console.warn("Multi-question challenge detected in single challenge component");
+  const submitFlag = async (questionIndex: number) => {
+    if (!challenge || !user) return;
+    
+    const questionState = questionStates[questionIndex];
+    const flagInput = questionState.flagInput;
+    
+    if (!flagInput.trim()) {
+      setMessage({ type: 'error', text: 'Please enter a flag', questionIndex });
       return;
     }
 
-    setSubmitting(true);
+    // Update submitting state for this specific question
+    setQuestionStates(prev => prev.map((q, idx) => 
+      idx === questionIndex ? { ...q, isSubmitting: true } : q
+    ));
     setMessage(null);
 
     try {
-      // For single flag challenges
-      const isCorrect = challenge.flag?.trim() === flagInput.trim();
+      const question = challenge.questions?.[questionIndex];
+      if (!question) {
+        throw new Error("Question not found");
+      }
 
-      // Check if user has already solved this challenge and received points
-      const alreadySolvedWithPoints = await hasUserSolvedAndReceivedPoints(user.uid, challenge.id);
+      // Check if flag matches
+      const isCorrect = question.flag?.trim() === flagInput.trim();
       
-      // Determine points to award (0 if already solved, full points if first time)
       let pointsToAward = 0;
-      if (isCorrect && !alreadySolvedWithPoints) {
-        pointsToAward = challenge.points || 0;
+      if (isCorrect) {
+        // Check if user has already solved this specific question
+        const existingCorrectSubmission = allSubmissions.find(
+          sub => sub.isCorrect && 
+          ((sub.questionIndex === questionIndex) || 
+           (sub.questionId === question.id) ||
+           (sub.flag === question.flag))
+        );
+        
+        if (!existingCorrectSubmission) {
+          pointsToAward = question.points || 0;
+        }
       }
 
       // Record submission
@@ -197,7 +241,10 @@ const PracticeChallengeDetails = () => {
         submittedAt: new Date(),
         pointsAwarded: pointsToAward,
         points: pointsToAward,
-        username: user.displayName || user.email?.split('@')[0] || 'User'
+        username: user.displayName || user.email?.split('@')[0] || 'User',
+        questionIndex: questionIndex,
+        questionId: question.id,
+        questionPoints: question.points
       };
 
       await addDoc(collection(db, "submissions"), submissionData);
@@ -221,28 +268,60 @@ const PracticeChallengeDetails = () => {
         setMessage({ 
           type: 'success', 
           text: pointsToAward > 0 
-            ? `Congratulations! Flag is correct! +${pointsToAward} points awarded!`
-            : 'Congratulations! Flag is correct! (No additional points - already solved)'
+            ? `Question ${questionIndex + 1} solved! +${pointsToAward} points!`
+            : `Question ${questionIndex + 1} solved! (Already solved)`,
+          questionIndex
         });
-        setFlagInput("");
+        
+        // Clear input for this question
+        setQuestionStates(prev => prev.map((q, idx) => 
+          idx === questionIndex ? { 
+            ...q, 
+            flagInput: "", 
+            isSolved: true,
+            pointsEarned: pointsToAward > 0 ? pointsToAward : q.pointsEarned
+          } : q
+        ));
         
         // Refresh submissions
         fetchSubmissions();
       } else {
-        setMessage({ type: 'error', text: 'Incorrect flag. Please try again.' });
+        setMessage({ 
+          type: 'error', 
+          text: 'Incorrect flag. Please try again.',
+          questionIndex 
+        });
       }
     } catch (error) {
       console.error("Error submitting flag:", error);
-      setMessage({ type: 'error', text: 'Failed to submit flag. Please try again.' });
+      setMessage({ 
+        type: 'error', 
+        text: 'Failed to submit flag. Please try again.',
+        questionIndex 
+      });
     } finally {
-      setSubmitting(false);
+      // Reset submitting state for this question
+      setQuestionStates(prev => prev.map((q, idx) => 
+        idx === questionIndex ? { ...q, isSubmitting: false } : q
+      ));
     }
   };
 
-  const toggleHint = (index: number) => {
-    const newShowHints = [...showHints];
-    newShowHints[index] = !newShowHints[index];
-    setShowHints(newShowHints);
+  const updateQuestionFlagInput = (questionIndex: number, value: string) => {
+    setQuestionStates(prev => prev.map((q, idx) => 
+      idx === questionIndex ? { ...q, flagInput: value } : q
+    ));
+  };
+
+  const toggleQuestionHint = (questionIndex: number, hintIndex: number) => {
+    setQuestionStates(prev => prev.map((q, idx) => {
+      if (idx === questionIndex) {
+        const newShowHints = [...q.showHints];
+        newShowHints[hintIndex] = !newShowHints[hintIndex];
+        return { ...q, showHints: newShowHints };
+      }
+      return q;
+    }));
   };
 
   const navigateToPractice = () => {
@@ -253,7 +332,21 @@ const PracticeChallengeDetails = () => {
     navigator.clipboard.writeText(text);
   };
 
-  const isSolved = challenge?.solvedBy?.includes(user?.uid || '');
+  // Calculate progress for multi-question challenges
+  const questionProgress = challenge?.hasMultipleQuestions 
+    ? {
+        solved: questionStates.filter(q => q.isSolved).length,
+        total: challenge.questions?.length || 0,
+        percentage: challenge.questions ? 
+          (questionStates.filter(q => q.isSolved).length / challenge.questions.length) * 100 : 0
+      }
+    : null;
+
+  // Calculate total points earned
+  const totalPointsEarned = questionStates.reduce((sum, q) => sum + q.pointsEarned, 0);
+
+  // Check if user has solved the entire challenge
+  const isFullySolved = questionProgress?.solved === questionProgress?.total;
 
   // Function to format date properly
   const formatDate = (date: any) => {
@@ -262,12 +355,10 @@ const PracticeChallengeDetails = () => {
     try {
       const dateObj = date?.toDate ? date.toDate() : new Date(date);
       
-      // Check if date is valid
       if (isNaN(dateObj.getTime())) {
         return 'Invalid date';
       }
       
-      // Format as "Nov 26, 2024" (current year)
       return dateObj.toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'short',
@@ -279,70 +370,27 @@ const PracticeChallengeDetails = () => {
     }
   };
 
-  // Function to render challenge content with proper formatting
-  const renderChallengeContent = () => {
-    if (!challenge?.description) return null;
-
-    const lines = challenge.description.split('\n');
-    const content = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      
-      if (line.startsWith('n =') || line.startsWith('e =') || line.startsWith('c =')) {
-        // Handle crypto parameters with copy buttons
-        const [key, ...valueParts] = line.split('=');
-        const value = valueParts.join('=').trim();
-        
-        content.push(
-          <div key={i} className="mb-3 p-3 bg-muted/30 border rounded-lg">
-            <div className="flex items-center justify-between mb-1">
-              <span className="font-mono font-semibold text-xs">{key}=</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => copyToClipboard(value)}
-                className="h-6 px-2"
-              >
-                <Copy className="w-3 h-3" />
-              </Button>
-            </div>
-            <div className="font-mono text-xs bg-background p-2 rounded border break-all overflow-x-auto">
-              <pre className="whitespace-pre-wrap break-words m-0">{value}</pre>
-            </div>
-          </div>
-        );
-      } else if (line.includes('=') && line.length > 50) {
-        // Handle other long key-value pairs
-        const [key, ...valueParts] = line.split('=');
-        const value = valueParts.join('=').trim();
-        
-        content.push(
-          <div key={i} className="mb-2">
-            <strong className="text-sm">{key}=</strong>
-            <div className="font-mono text-xs bg-muted/30 p-2 rounded border break-all overflow-x-auto mt-1">
-              <pre className="whitespace-pre-wrap break-words m-0">{value}</pre>
-            </div>
-          </div>
-        );
-      } else if (line) {
-        // Regular text
-        content.push(
-          <p key={i} className="mb-2 text-sm leading-relaxed break-words">
-            {line}
-          </p>
-        );
-      } else {
-        // Empty line (paragraph break)
-        content.push(<div key={i} className="mb-2" />);
-      }
+  const getDifficultyColor = (difficulty: string) => {
+    switch (difficulty) {
+      case "easy": return "bg-green-500/20 text-green-600 border-green-200";
+      case "medium": return "bg-yellow-500/20 text-yellow-600 border-yellow-200";
+      case "hard": return "bg-red-500/20 text-red-600 border-red-200";
+      case "expert": return "bg-purple-500/20 text-purple-600 border-purple-200";
+      default: return "bg-gray-500/20 text-gray-600 border-gray-200";
     }
-
-    return content;
   };
 
-  // Calculate if user received points for this solve
-  const userReceivedPoints = submissions.some(sub => sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0);
+  const getCategoryColor = (category: string) => {
+    const colors: { [key: string]: string } = {
+      web: "bg-blue-500/20 text-blue-600 border-blue-200",
+      crypto: "bg-purple-500/20 text-purple-600 border-purple-200",
+      forensics: "bg-orange-500/20 text-orange-600 border-orange-200",
+      pwn: "bg-red-500/20 text-red-600 border-red-200",
+      reversing: "bg-indigo-500/20 text-indigo-600 border-indigo-200",
+      misc: "bg-gray-500/20 text-gray-600 border-gray-200"
+    };
+    return colors[category] || "bg-gray-500/20 text-gray-600 border-gray-200";
+  };
 
   if (loading) {
     return (
@@ -352,7 +400,7 @@ const PracticeChallengeDetails = () => {
           <div className="container mx-auto px-4 py-6">
             <div className="text-center py-8">
               <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto"></div>
-              <p className="mt-2 text-sm text-muted-foreground">Loading challenge...</p>
+              <p className="mt-2 text-sm text-muted-foreground">Loading multi-question challenge...</p>
             </div>
           </div>
         </div>
@@ -387,34 +435,12 @@ const PracticeChallengeDetails = () => {
     );
   }
 
-  const getDifficultyColor = (difficulty: string) => {
-    switch (difficulty) {
-      case "easy": return "bg-green-500/20 text-green-600 border-green-200";
-      case "medium": return "bg-yellow-500/20 text-yellow-600 border-yellow-200";
-      case "hard": return "bg-red-500/20 text-red-600 border-red-200";
-      case "expert": return "bg-purple-500/20 text-purple-600 border-purple-200";
-      default: return "bg-gray-500/20 text-gray-600 border-gray-200";
-    }
-  };
-
-  const getCategoryColor = (category: string) => {
-    const colors: { [key: string]: string } = {
-      web: "bg-blue-500/20 text-blue-600 border-blue-200",
-      crypto: "bg-purple-500/20 text-purple-600 border-purple-200",
-      forensics: "bg-orange-500/20 text-orange-600 border-orange-200",
-      pwn: "bg-red-500/20 text-red-600 border-red-200",
-      reversing: "bg-indigo-500/20 text-indigo-600 border-indigo-200",
-      misc: "bg-gray-500/20 text-gray-600 border-gray-200"
-    };
-    return colors[category] || "bg-gray-500/20 text-gray-600 border-gray-200";
-  };
-
   return (
     <>
       <Navbar />
       <div className="min-h-screen bg-background pt-16">
         <div className="container mx-auto px-4 py-6">
-          {/* Mobile-optimized header */}
+          {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
             <div className="flex items-center gap-2">
               <Button 
@@ -431,10 +457,10 @@ const PracticeChallengeDetails = () => {
             </div>
             
             <div className="flex items-center gap-2 flex-wrap">
-              {isSolved && (
-                <Badge className="bg-green-500/20 text-green-600 border-green-200 text-xs">
+              {questionProgress && (
+                <Badge className="bg-blue-500/20 text-blue-600 border-blue-200 text-xs">
                   <CheckCircle className="w-3 h-3 mr-1" />
-                  {userReceivedPoints ? 'Solved + Points' : 'Solved'}
+                  {questionProgress.solved}/{questionProgress.total} Questions
                 </Badge>
               )}
               {challenge.featuredOnPractice && (
@@ -446,7 +472,7 @@ const PracticeChallengeDetails = () => {
             </div>
           </div>
 
-          {/* Mobile-optimized challenge info */}
+          {/* Challenge Info */}
           <Card className="mb-4 border">
             <CardContent className="p-3 sm:p-4">
               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -459,6 +485,11 @@ const PracticeChallengeDetails = () => {
                 <Badge variant="outline" className="font-mono font-semibold text-xs">
                   {challenge.totalPoints || challenge.points} pts
                 </Badge>
+                {questionProgress && (
+                  <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-600">
+                    {totalPointsEarned}/{challenge.totalPoints || challenge.points} pts earned
+                  </Badge>
+                )}
                 <div className="flex items-center gap-1 text-muted-foreground">
                   <Users className="w-3 h-3" />
                   <span>{challenge.solvedBy?.length || 0} solves</span>
@@ -469,7 +500,6 @@ const PracticeChallengeDetails = () => {
                 </div>
               </div>
               
-              {/* Creator info - stacked on mobile */}
               <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mt-2 text-xs text-muted-foreground">
                 <div>By: {challenge.createdByName || 'Unknown'}</div>
                 {challenge.originalCreator && (
@@ -494,13 +524,48 @@ const PracticeChallengeDetails = () => {
             </CardContent>
           </Card>
 
-          {/* Mobile-optimized main content - Stack tabs vertically on mobile */}
+          {/* Question Selector */}
+          <Card className="mb-4 border">
+            <CardContent className="p-3">
+              <div className="flex flex-wrap gap-1">
+                {challenge.questions?.map((question, index) => {
+                  const qState = questionStates[index] || {
+                    isSolved: false,
+                    pointsEarned: 0
+                  };
+                  
+                  return (
+                    <Button
+                      key={index}
+                      variant={activeQuestionIndex === index ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setActiveQuestionIndex(index)}
+                      className={`h-8 px-2 sm:px-3 ${
+                        qState.isSolved 
+                          ? 'bg-green-500/10 text-green-600 hover:bg-green-500/20 border-green-200' 
+                          : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs">Q{index + 1}</span>
+                        {qState.isSolved && (
+                          <CheckCircle className="w-3 h-3" />
+                        )}
+                      </div>
+                    </Button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Main Content */}
           <div className="flex flex-col lg:grid lg:grid-cols-3 gap-4">
             {/* Main Content - Full width on mobile */}
             <div className="lg:col-span-2 space-y-4">
-              {/* Mobile-optimized tabs with better spacing */}
+              {/* Mobile-optimized tabs */}
               <div className="w-full">
-                {/* Tabs Header - Horizontal scroll on mobile if needed */}
+                {/* Tabs Header */}
                 <div className="flex overflow-x-auto scrollbar-hide mb-4 bg-muted/30 rounded-lg p-1">
                   <button
                     onClick={() => setActiveTab("description")}
@@ -510,7 +575,7 @@ const PracticeChallengeDetails = () => {
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    Description
+                    Question {activeQuestionIndex + 1}
                   </button>
                   <button
                     onClick={() => setActiveTab("hints")}
@@ -520,7 +585,7 @@ const PracticeChallengeDetails = () => {
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    Hints ({challenge.hints?.length || 0})
+                    Hints ({challenge.questions?.[activeQuestionIndex]?.hints?.length || 0})
                   </button>
                   <button
                     onClick={() => setActiveTab("files")}
@@ -530,7 +595,7 @@ const PracticeChallengeDetails = () => {
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    Files ({(challenge.files?.length || 0)})
+                    Files ({(challenge.questions?.[activeQuestionIndex]?.files?.length || 0) + (challenge.files?.length || 0)})
                   </button>
                 </div>
 
@@ -541,26 +606,40 @@ const PracticeChallengeDetails = () => {
                     <Card className="border">
                       <CardContent className="p-4 sm:p-6">
                         <div className="space-y-3 break-words">
-                          {renderChallengeContent()}
+                          <div className="flex items-center justify-between mb-4">
+                            <h3 className="font-bold text-lg">Question {activeQuestionIndex + 1}</h3>
+                            <Badge variant="outline" className="font-mono font-semibold">
+                              {challenge.questions?.[activeQuestionIndex]?.points || 0} pts
+                            </Badge>
+                          </div>
                           
-                          {challenge.flagFormat && (
+                          <div className="prose prose-sm max-w-none">
+                            {challenge.questions?.[activeQuestionIndex]?.question?.split('\n').map((line, i) => (
+                              <p key={i} className="mb-2 text-sm leading-relaxed break-words">
+                                {line}
+                              </p>
+                            ))}
+                          </div>
+                          
+                          {challenge.questions?.[activeQuestionIndex]?.flagFormat && (
                             <div className="p-3 bg-blue-500/10 border border-blue-200 rounded text-xs">
                               <p className="text-blue-600 break-words">
-                                <strong>Flag Format:</strong> {challenge.flagFormat}
+                                <strong>Flag Format:</strong> {challenge.questions[activeQuestionIndex].flagFormat}
                               </p>
                             </div>
                           )}
                           
-                          {isSolved && challenge.flag && (
+                          {/* Show flag if question is solved */}
+                          {questionStates[activeQuestionIndex]?.isSolved && challenge.questions?.[activeQuestionIndex]?.flag && (
                             <div className="p-3 bg-green-500/10 border border-green-200 rounded break-words">
                               <div className="flex items-center justify-between gap-2">
                                 <p className="text-xs text-green-600 font-mono break-all flex-1">
-                                  <strong>Flag:</strong> {challenge.flag}
+                                  <strong>Flag:</strong> {challenge.questions[activeQuestionIndex].flag}
                                 </p>
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => copyToClipboard(challenge.flag!)}
+                                  onClick={() => copyToClipboard(challenge.questions![activeQuestionIndex].flag!)}
                                   className="h-6 px-2 flex-shrink-0"
                                 >
                                   <Copy className="w-3 h-3" />
@@ -577,9 +656,9 @@ const PracticeChallengeDetails = () => {
                   {activeTab === "hints" && (
                     <Card className="border">
                       <CardContent className="p-4 sm:p-6">
-                        {challenge.hints && challenge.hints.length > 0 ? (
+                        {challenge.questions?.[activeQuestionIndex]?.hints && challenge.questions[activeQuestionIndex].hints.length > 0 ? (
                           <div className="space-y-3">
-                            {challenge.hints.map((hint, index) => (
+                            {challenge.questions[activeQuestionIndex].hints.map((hint, index) => (
                               <Card key={index} className="border">
                                 <CardContent className="p-3">
                                   <div className="flex items-start gap-3">
@@ -592,10 +671,10 @@ const PracticeChallengeDetails = () => {
                                         <Button
                                           variant="ghost"
                                           size="sm"
-                                          onClick={() => toggleHint(index)}
+                                          onClick={() => toggleQuestionHint(activeQuestionIndex, index)}
                                           className="h-6 px-2 text-xs"
                                         >
-                                          {showHints[index] ? (
+                                          {questionStates[activeQuestionIndex]?.showHints?.[index] ? (
                                             <>
                                               <EyeOff className="w-3 h-3 mr-1" />
                                               Hide
@@ -608,7 +687,7 @@ const PracticeChallengeDetails = () => {
                                           )}
                                         </Button>
                                       </div>
-                                      {showHints[index] && (
+                                      {questionStates[activeQuestionIndex]?.showHints?.[index] && (
                                         <p className="text-sm text-muted-foreground bg-muted/30 p-3 rounded border break-words">
                                           {hint}
                                         </p>
@@ -621,7 +700,7 @@ const PracticeChallengeDetails = () => {
                           </div>
                         ) : (
                           <div className="text-center py-4">
-                            <p className="text-sm text-muted-foreground">No hints available.</p>
+                            <p className="text-sm text-muted-foreground">No hints available for this question.</p>
                           </div>
                         )}
                       </CardContent>
@@ -632,31 +711,66 @@ const PracticeChallengeDetails = () => {
                   {activeTab === "files" && (
                     <Card className="border">
                       <CardContent className="p-4 sm:p-6">
-                        {challenge.files && challenge.files.length > 0 ? (
-                          <div className="space-y-2">
-                            {challenge.files.map((file, index) => (
-                              <a
-                                key={index}
-                                href={file.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-2 p-3 text-sm border rounded hover:bg-accent transition-colors"
-                              >
-                                {file.type === 'file' ? (
-                                  <FileText className="w-4 h-4" />
-                                ) : (
-                                  <Link className="w-4 h-4" />
-                                )}
-                                <span className="flex-1 truncate">{file.name}</span>
-                                <ExternalLink className="w-3 h-3" />
-                              </a>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-center py-4">
-                            <p className="text-sm text-muted-foreground">No files or links available.</p>
-                          </div>
-                        )}
+                        <div className="space-y-4">
+                          {/* Challenge Files */}
+                          {challenge.files && challenge.files.length > 0 && (
+                            <div>
+                              <h4 className="font-semibold text-sm mb-2">Challenge Files</h4>
+                              <div className="space-y-2">
+                                {challenge.files.map((file, index) => (
+                                  <a
+                                    key={`challenge-${index}`}
+                                    href={file.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 p-3 text-sm border rounded hover:bg-accent transition-colors"
+                                  >
+                                    {file.type === 'file' ? (
+                                      <FileText className="w-4 h-4" />
+                                    ) : (
+                                      <Link className="w-4 h-4" />
+                                    )}
+                                    <span className="flex-1 truncate">{file.name}</span>
+                                    <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Question Files */}
+                          {challenge.questions?.[activeQuestionIndex]?.files && challenge.questions[activeQuestionIndex].files.length > 0 && (
+                            <div>
+                              <h4 className="font-semibold text-sm mb-2">Question Files</h4>
+                              <div className="space-y-2">
+                                {challenge.questions[activeQuestionIndex].files.map((file, index) => (
+                                  <a
+                                    key={`question-${index}`}
+                                    href={file.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 p-3 text-sm border rounded hover:bg-accent transition-colors"
+                                  >
+                                    {file.type === 'file' ? (
+                                      <FileText className="w-4 h-4" />
+                                    ) : (
+                                      <Link className="w-4 h-4" />
+                                    )}
+                                    <span className="flex-1 truncate">{file.name}</span>
+                                    <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {(!challenge.files || challenge.files.length === 0) && 
+                           (!challenge.questions?.[activeQuestionIndex]?.files || challenge.questions[activeQuestionIndex].files.length === 0) && (
+                            <div className="text-center py-4">
+                              <p className="text-sm text-muted-foreground">No files or links available.</p>
+                            </div>
+                          )}
+                        </div>
                       </CardContent>
                     </Card>
                   )}
@@ -664,18 +778,18 @@ const PracticeChallengeDetails = () => {
               </div>
             </div>
 
-            {/* Sidebar - Full width on mobile, sticky on desktop */}
+            {/* Sidebar */}
             <div className="space-y-4">
-              {/* Flag Submission - Mobile optimized */}
+              {/* Flag Submission */}
               <Card className="border lg:sticky lg:top-4">
                 <CardHeader className="p-4 pb-2">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Flag className="w-4 h-4" />
-                    Submit Flag
+                    Submit Answer
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 pt-2 space-y-3">
-                  {message && (
+                  {message?.questionIndex === activeQuestionIndex && (
                     <Alert className={`text-sm ${message.type === 'success' ? 'bg-green-500/10 border-green-200' : 'bg-red-500/10 border-red-200'}`}>
                       {message.type === 'success' ? (
                         <CheckCircle className="w-4 h-4 text-green-600" />
@@ -688,34 +802,34 @@ const PracticeChallengeDetails = () => {
                     </Alert>
                   )}
 
-                  {!isSolved ? (
+                  {!questionStates[activeQuestionIndex]?.isSolved ? (
                     <div className="space-y-2">
                       <div className="space-y-1">
-                        <Label htmlFor="flag" className="text-xs font-medium">Enter Flag</Label>
+                        <Label htmlFor="flag" className="text-xs font-medium">Enter Answer for Question {activeQuestionIndex + 1}</Label>
                         <Input
                           id="flag"
-                          placeholder="CTF{...} or flag content"
-                          value={flagInput}
-                          onChange={(e) => setFlagInput(e.target.value)}
-                          onKeyPress={(e) => e.key === 'Enter' && submitFlag()}
+                          placeholder={challenge.questions?.[activeQuestionIndex]?.flagFormat || "Enter flag..."}
+                          value={questionStates[activeQuestionIndex]?.flagInput || ""}
+                          onChange={(e) => updateQuestionFlagInput(activeQuestionIndex, e.target.value)}
+                          onKeyPress={(e) => e.key === 'Enter' && submitFlag(activeQuestionIndex)}
                           className="font-mono text-sm h-9"
                         />
                       </div>
                       <Button 
-                        onClick={submitFlag} 
-                        disabled={submitting || !flagInput.trim()}
+                        onClick={() => submitFlag(activeQuestionIndex)} 
+                        disabled={questionStates[activeQuestionIndex]?.isSubmitting || !questionStates[activeQuestionIndex]?.flagInput?.trim()}
                         className="w-full h-9"
                         variant="terminal"
                       >
-                        {submitting ? (
+                        {questionStates[activeQuestionIndex]?.isSubmitting ? (
                           <>
                             <div className="animate-spin w-3 h-3 border border-white border-t-transparent rounded-full mr-2"></div>
                             Checking...
                           </>
                         ) : (
                           <>
-                            <Shield className="w-3 h-3 mr-1" />
-                            Submit Flag
+                            <Flag className="w-3 h-3 mr-1" />
+                            Submit Answer
                           </>
                         )}
                       </Button>
@@ -723,27 +837,59 @@ const PracticeChallengeDetails = () => {
                   ) : (
                     <div className="text-center p-3 bg-green-500/10 border border-green-200 rounded">
                       <CheckCircle className="w-8 h-8 text-green-600 mx-auto mb-1" />
-                      <p className="text-green-600 font-semibold text-sm">Challenge Solved!</p>
-                      <p className="text-green-600 text-xs mt-1">
-                        {userReceivedPoints 
-                          ? `+${challenge.totalPoints || challenge.points} points awarded`
-                          : 'Already solved - no additional points'
-                        }
-                      </p>
+                      <p className="text-green-600 font-semibold text-sm">Question Solved!</p>
+                      {questionStates[activeQuestionIndex]?.pointsEarned > 0 && (
+                        <p className="text-green-600 text-xs mt-1">
+                          +{questionStates[activeQuestionIndex].pointsEarned} points earned
+                        </p>
+                      )}
                     </div>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Submission History - Mobile optimized */}
-              {submissions.length > 0 && (
+              {/* Progress Summary */}
+              <Card className="border">
+                <CardHeader className="p-4 pb-2">
+                  <CardTitle className="text-base">Progress Summary</CardTitle>
+                </CardHeader>
+                <CardContent className="p-4 pt-2 space-y-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Questions Solved</span>
+                      <span className="font-semibold">{questionProgress?.solved || 0}/{questionProgress?.total || 0}</span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-2">
+                      <div 
+                        className="bg-green-500 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${questionProgress?.percentage || 0}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Points Earned</span>
+                      <span className="font-semibold">{totalPointsEarned}/{challenge.totalPoints || challenge.points}</span>
+                    </div>
+                    {isFullySolved && (
+                      <div className="text-center p-2 bg-green-500/10 border border-green-200 rounded mt-2">
+                        <p className="text-green-600 font-semibold text-xs">All Questions Solved! 🎉</p>
+                        <p className="text-green-600 text-xs mt-1">
+                          Total: +{totalPointsEarned} points
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Submission History */}
+              {questionStates[activeQuestionIndex]?.submissions && questionStates[activeQuestionIndex].submissions.length > 0 && (
                 <Card className="border">
                   <CardHeader className="p-4 pb-2">
                     <CardTitle className="text-base">Submission History</CardTitle>
                   </CardHeader>
                   <CardContent className="p-4 pt-2">
                     <div className="space-y-1 max-h-48 overflow-y-auto">
-                      {submissions.map((submission) => (
+                      {questionStates[activeQuestionIndex].submissions.map((submission) => (
                         <div key={submission.id} className="flex items-center justify-between p-2 border rounded text-xs">
                           <div className="flex items-center gap-1 flex-1 min-w-0">
                             {submission.isCorrect ? (
@@ -777,4 +923,4 @@ const PracticeChallengeDetails = () => {
   );
 };
 
-export default PracticeChallengeDetails;
+export default MultiQuestionPracticeChallengeDetails;

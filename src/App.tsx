@@ -20,6 +20,8 @@ import GlobalLeaderboard from './components/GlobalLeaderboard';
 import LiveLeaderboard from './components/LiveLeaderboard';
 import AdminDashboard from './components/AdminDashboard';
 import PracticeChallengeDetail from './components/PracticeChallengeDetail';
+// IMPORT THE MULTI-QUESTION COMPONENT
+import MultiQuestionPracticeChallengeDetails from './components/admin/practice/MultiQuestionPracticeChallengeDetails';
 import LiveEventChallengeDetail from './components/LiveEventChallengeDetail';
 import UpcomingChallengePreview from './components/UpcomingChallengePreview';
 import UpcomingEventDetails from './components/UpcomingEventDetails';
@@ -138,12 +140,23 @@ function App() {
                     } 
                   />
                   
-                  {/* Practice Challenge Detail Route - Accessible to ALL authenticated users (including admins) */}
+                  {/* Practice Challenge Detail Routes - Accessible to ALL authenticated users (including admins) */}
+                  {/* SINGLE QUESTION CHALLENGES */}
                   <Route 
                     path="/practice/challenge/:challengeId" 
                     element={
                       <ProtectedRoute>
                         <PracticeChallengeDetail />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  
+                  {/* MULTI-QUESTION CHALLENGES - ADD THIS ROUTE */}
+                  <Route 
+                    path="/practice/multi/:challengeId" 
+                    element={
+                      <ProtectedRoute>
+                        <MultiQuestionPracticeChallengeDetails />
                       </ProtectedRoute>
                     } 
                   />

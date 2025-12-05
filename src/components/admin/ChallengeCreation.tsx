@@ -1,6 +1,6 @@
 // src/components/admin/ChallengeCreation.tsx
 import { useState, useEffect } from "react";
-import { collection, addDoc, getDocs, query, where, orderBy } from "firebase/firestore";
+import { collection, addDoc, getDocs, query, where, orderBy, doc, getDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../../firebase";
 import { useAuthContext } from "../../contexts/AuthContext";
@@ -12,7 +12,11 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { X, Plus, Upload, Link, FileText, User, ExternalLink, Star, Shield, Calendar, Users } from "lucide-react";
+import { 
+  X, Plus, Upload, Link, FileText, User, ExternalLink, 
+  Star, Shield, Calendar, Users, Eye, EyeOff, Lightbulb, 
+  ChevronDown, ChevronUp, ArrowLeft, Flag 
+} from "lucide-react";
 
 interface ChallengeCreationProps {
   onBack: () => void;
@@ -26,6 +30,10 @@ interface Question {
   question: string;
   points: number;
   flag: string;
+  flagFormat?: string;
+  hints: string[];
+  files: FileAttachment[];
+  expanded?: boolean;
 }
 
 interface FileAttachment {
@@ -91,7 +99,16 @@ const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: C
   });
 
   const [questions, setQuestions] = useState<Question[]>([
-    { id: "1", question: "", points: 0, flag: "" }
+    { 
+      id: "1", 
+      question: "", 
+      points: 10, 
+      flag: "", 
+      flagFormat: "",
+      hints: [],
+      files: [],
+      expanded: true
+    }
   ]);
 
   const [loading, setLoading] = useState(false);
@@ -116,7 +133,6 @@ const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: C
       }
 
       // Only auto-update if the current difficulty doesn't match the suggested one
-      // This prevents constant changing when user manually sets difficulty
       const currentDifficultyPoints = {
         easy: { min: 1, max: 100 },
         medium: { min: 101, max: 300 },
@@ -199,6 +215,23 @@ const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: C
     setLoading(true);
     
     try {
+      console.log("=== STARTING CHALLENGE CREATION ===");
+      
+      // Check user permissions
+      if (user) {
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        const userData = userDoc.data();
+        const userRole = userData?.role;
+        
+        console.log("User role:", userRole);
+        
+        if (userRole !== 'admin' && userRole !== 'moderator') {
+          alert("You need admin or moderator permissions to create challenges.");
+          setLoading(false);
+          return;
+        }
+      }
+
       // Validate form
       if (!formData.title.trim()) {
         alert("Please enter a challenge title");
@@ -215,18 +248,33 @@ const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: C
         return;
       }
 
-      // Validate flags
-      if (!formData.hasMultipleQuestions && !formData.flag.trim()) {
-        alert("Please enter a flag for the challenge");
-        return;
-      }
-
+      // Validate based on challenge type
       if (formData.hasMultipleQuestions) {
-        for (const question of questions) {
-          if (!question.question.trim() || !question.flag.trim() || question.points <= 0) {
-            alert("Please fill all questions with valid points and flags");
+        console.log("Validating multi-question challenge...");
+        // Validate multi-question challenge
+        for (let i = 0; i < questions.length; i++) {
+          const question = questions[i];
+          console.log(`Validating question ${i + 1}:`, question);
+          
+          if (!question.question.trim()) {
+            alert(`Please enter text for question ${i + 1}`);
             return;
           }
+          if (!question.flag.trim()) {
+            alert(`Please enter a flag for question ${i + 1}`);
+            return;
+          }
+          if (question.points <= 0) {
+            alert(`Please enter valid points for question ${i + 1} (must be greater than 0)`);
+            return;
+          }
+        }
+      } else {
+        console.log("Validating single-flag challenge...");
+        // Validate single-flag challenge
+        if (!formData.flag.trim()) {
+          alert("Please enter a flag for the challenge");
+          return;
         }
       }
 
@@ -243,47 +291,93 @@ const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: C
         challengeType = 'practice'; // Can't have live challenge without event
       }
 
-      const challengeData = {
-        ...formData,
-        // Use custom category if selected, otherwise use predefined category
-        finalCategory: showCustomCategory ? formData.customCategory : formData.category,
-        questions: formData.hasMultipleQuestions ? questions : [],
+      // Prepare challenge data
+      const challengeData: any = {
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+        finalCategory: showCustomCategory ? formData.customCategory.trim() : formData.category,
+        difficulty: formData.difficulty,
+        points: formData.hasMultipleQuestions ? totalPoints : formData.points,
+        totalPoints: totalPoints,
+        hasMultipleQuestions: formData.hasMultipleQuestions,
+        isExternalChallenge: formData.isExternalChallenge,
+        hints: formData.hints.filter(hint => hint.trim() !== ""),
+        files: formData.files.map(file => ({
+          id: file.id,
+          name: file.name,
+          url: file.url,
+          type: file.type
+        })),
         createdAt: new Date(),
         isActive: true,
         solvedBy: [],
-        hints: formData.hints.filter(hint => hint.trim() !== ""),
         // Event assignment
         eventId: eventIdToAssign,
-        // Use calculated total points
-        totalPoints: totalPoints,
-        // For multi-question challenges, ensure points field is consistent
-        points: formData.hasMultipleQuestions ? totalPoints : formData.points,
         // Creator information
         createdBy: user?.uid,
-        createdByName: user?.displayName || user?.email,
+        createdByName: user?.displayName || user?.email || "Unknown",
         // Practice fields
         featuredOnPractice: formData.featuredOnPractice,
         availableInPractice: formData.availableInPractice,
         challengeType: challengeType,
-        // If it's an external challenge, include attribution
-        ...(formData.isExternalChallenge && {
-          attribution: {
-            ...formData.externalSource,
-            importedBy: user?.displayName || user?.email,
-            importedById: user?.uid,
-            importedAt: new Date()
-          }
-        }),
-        // If creator is specified (for challenges by other users)
-        ...(formData.creator && {
-          originalCreator: {
-            name: formData.creator,
-            url: formData.creatorUrl
-          }
-        })
       };
 
+      // CRITICAL FIX: Only add flag and flagFormat for single-question challenges
+      // For multi-question challenges, don't include these fields
+      if (!formData.hasMultipleQuestions) {
+        challengeData.flag = formData.flag.trim();
+        challengeData.flagFormat = formData.flagFormat.trim();
+      }
+      // For multi-question challenges, flag and flagFormat are not included
+
+      // Add questions for multi-question challenges
+      if (formData.hasMultipleQuestions) {
+        challengeData.questions = questions.map(q => ({
+          id: q.id,
+          question: q.question.trim(),
+          points: Number(q.points) || 0,
+          flag: q.flag.trim(),
+          flagFormat: q.flagFormat?.trim() || "",
+          hints: q.hints.filter(hint => hint.trim() !== ""),
+          files: q.files.map(file => ({
+            id: file.id,
+            name: file.name,
+            url: file.url,
+            type: file.type
+          }))
+        }));
+        
+        console.log("Prepared questions:", challengeData.questions);
+      }
+
+      // Add external challenge attribution if applicable
+      if (formData.isExternalChallenge) {
+        challengeData.attribution = {
+          ctfName: formData.externalSource.ctfName.trim(),
+          ctfUrl: formData.externalSource.ctfUrl.trim(),
+          originalAuthor: formData.externalSource.originalAuthor.trim(),
+          authorUrl: formData.externalSource.authorUrl.trim(),
+          license: formData.externalSource.license,
+          importedBy: user?.displayName || user?.email,
+          importedById: user?.uid,
+          importedAt: new Date()
+        };
+      }
+
+      // Add original creator if specified
+      if (formData.creator.trim()) {
+        challengeData.originalCreator = {
+          name: formData.creator.trim(),
+          url: formData.creatorUrl.trim()
+        };
+      }
+
+      console.log("Final challenge data to submit:", challengeData);
+
+      // Try to create the challenge
+      console.log("Attempting to add document to 'challenges' collection...");
       const docRef = await addDoc(collection(db, "challenges"), challengeData);
+      console.log("Challenge created successfully! Document ID:", docRef.id);
       
       // Show success message with assignment info
       const assignedEvent = events.find(e => e.id === eventIdToAssign);
@@ -294,9 +388,19 @@ const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: C
       alert(successMessage);
       onChallengeCreated(docRef.id);
       resetForm();
-    } catch (error) {
-      console.error("Error creating challenge:", error);
-      alert("Error creating challenge. Please try again.");
+    } catch (error: any) {
+      console.error("=== ERROR CREATING CHALLENGE ===");
+      console.error("Error message:", error.message);
+      console.error("Error code:", error.code);
+      
+      // More specific error messages
+      if (error.code === 'permission-denied') {
+        alert("Permission denied. You don't have permission to create challenges.");
+      } else if (error.code === 'invalid-argument') {
+        alert(`Invalid data: ${error.message}. Please check all fields and try again.`);
+      } else {
+        alert(`Error creating challenge: ${error.message}. Please try again.`);
+      }
     } finally {
       setLoading(false);
     }
@@ -331,7 +435,16 @@ const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: C
       availableInPractice: true,
       challengeType: 'practice'
     });
-    setQuestions([{ id: "1", question: "", points: 0, flag: "" }]);
+    setQuestions([{ 
+      id: "1", 
+      question: "", 
+      points: 10, 
+      flag: "", 
+      flagFormat: "",
+      hints: [],
+      files: [],
+      expanded: true
+    }]);
     setShowCustomCategory(false);
     setUploadingFiles(new Set());
   };
@@ -354,19 +467,30 @@ const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: C
     setFormData({ ...formData, hints: newHints });
   };
 
+  // Question Management Functions
   const addQuestion = () => {
     const newQuestion: Question = {
       id: Date.now().toString(),
       question: "",
-      points: 0,
-      flag: ""
+      points: 10,
+      flag: "",
+      flagFormat: "",
+      hints: [],
+      files: [],
+      expanded: true
     };
     setQuestions([...questions, newQuestion]);
   };
 
-  const updateQuestion = (id: string, field: keyof Question, value: string | number) => {
+  const updateQuestion = (id: string, field: keyof Question, value: string | number | boolean | string[] | FileAttachment[]) => {
     setQuestions(questions.map(q => 
       q.id === id ? { ...q, [field]: value } : q
+    ));
+  };
+
+  const toggleQuestionExpanded = (id: string) => {
+    setQuestions(questions.map(q => 
+      q.id === id ? { ...q, expanded: !q.expanded } : q
     ));
   };
 
@@ -376,6 +500,122 @@ const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: C
     }
   };
 
+  // Question Hints Management
+  const addQuestionHint = (questionId: string) => {
+    setQuestions(questions.map(q => 
+      q.id === questionId ? { ...q, hints: [...q.hints, ""] } : q
+    ));
+  };
+
+  const updateQuestionHint = (questionId: string, hintIndex: number, value: string) => {
+    setQuestions(questions.map(q => {
+      if (q.id === questionId) {
+        const newHints = [...q.hints];
+        newHints[hintIndex] = value;
+        return { ...q, hints: newHints };
+      }
+      return q;
+    }));
+  };
+
+  const removeQuestionHint = (questionId: string, hintIndex: number) => {
+    setQuestions(questions.map(q => 
+      q.id === questionId ? { 
+        ...q, 
+        hints: q.hints.filter((_, i) => i !== hintIndex) 
+      } : q
+    ));
+  };
+
+  // Question Files Management
+  const addQuestionFile = async (questionId: string, type: 'file' | 'link') => {
+    if (type === 'link') {
+      const url = prompt("Enter the URL for this question:");
+      if (url) {
+        try {
+          new URL(url);
+        } catch {
+          alert("Please enter a valid URL");
+          return;
+        }
+
+        const newFile: FileAttachment = {
+          id: Date.now().toString(),
+          name: `Link - ${new Date().toLocaleDateString()}`,
+          url: url,
+          type: 'link'
+        };
+        
+        setQuestions(questions.map(q => 
+          q.id === questionId ? { ...q, files: [...q.files, newFile] } : q
+        ));
+      }
+    } else {
+      // For file uploads
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = ".zip,.txt,.pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.py,.js,.html,.css,.xml,.json";
+      
+      input.onchange = async (e) => {
+        const files = (e.target as HTMLInputElement).files;
+        if (files && files.length > 0) {
+          const file = files[0];
+          const fileId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+          
+          try {
+            // Create temporary file entry
+            const tempFile: FileAttachment = {
+              id: fileId,
+              name: file.name,
+              url: "uploading...",
+              type: 'file'
+            };
+            
+            setQuestions(prev => prev.map(q => 
+              q.id === questionId ? { ...q, files: [...q.files, tempFile] } : q
+            ));
+
+            // Upload file to storage
+            const fileUrl = await uploadFileToStorage(file);
+            
+            // Update file with actual URL
+            setQuestions(prev => prev.map(q => 
+              q.id === questionId ? { 
+                ...q, 
+                files: q.files.map(f => 
+                  f.id === fileId ? { ...f, url: fileUrl } : f
+                ) 
+              } : q
+            ));
+            
+          } catch (error) {
+            console.error(`Error uploading file ${file.name}:`, error);
+            alert(`Failed to upload ${file.name}. Please try again.`);
+            
+            // Remove failed upload
+            setQuestions(prev => prev.map(q => 
+              q.id === questionId ? { 
+                ...q, 
+                files: q.files.filter(f => f.id !== fileId) 
+              } : q
+            ));
+          }
+        }
+      };
+      input.click();
+    }
+  };
+
+  const removeQuestionFile = (questionId: string, fileId: string) => {
+    setQuestions(questions.map(q => 
+      q.id === questionId ? { 
+        ...q, 
+        files: q.files.filter(file => file.id !== fileId) 
+      } : q
+    ));
+  };
+
+  // Main Files Management
   const addFileAttachment = async (type: 'file' | 'link') => {
     if (type === 'link') {
       const url = prompt("Enter the URL:");
@@ -404,7 +644,7 @@ const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: C
       const input = document.createElement('input');
       input.type = 'file';
       input.multiple = true; // Allow multiple files
-      input.accept = ".zip,.txt,.pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.py,.js,.html,.css,.xml,.json"; // Common file types
+      input.accept = ".zip,.txt,.pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.py,.js,.html,.css,.xml,.json";
       
       input.onchange = async (e) => {
         const files = (e.target as HTMLInputElement).files;
@@ -894,25 +1134,22 @@ const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: C
                       id="ctfUrl"
                       value={formData.externalSource.ctfUrl}
                       onChange={(e) => updateExternalSource('ctfUrl', e.target.value)}
-                      placeholder="https://ctf.example.com"
+                      placeholder="https://example.com/challenge"
                     />
                   </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  
                   <div>
-                    <Label htmlFor="originalAuthor">Original Author *</Label>
+                    <Label htmlFor="originalAuthor">Original Author</Label>
                     <Input
                       id="originalAuthor"
                       value={formData.externalSource.originalAuthor}
                       onChange={(e) => updateExternalSource('originalAuthor', e.target.value)}
                       placeholder="Name of the original challenge author"
-                      required
                     />
                   </div>
-
+                  
                   <div>
-                    <Label htmlFor="authorUrl">Author Profile URL</Label>
+                    <Label htmlFor="authorUrl">Author URL</Label>
                     <Input
                       id="authorUrl"
                       value={formData.externalSource.authorUrl}
@@ -920,70 +1157,120 @@ const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: C
                       placeholder="https://github.com/original-author"
                     />
                   </div>
-                </div>
-
-                <div>
-                  <Label htmlFor="license">License</Label>
-                  <Select 
-                    value={formData.externalSource.license} 
-                    onValueChange={(value) => updateExternalSource('license', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unknown">Unknown</SelectItem>
-                      <SelectItem value="MIT">MIT License</SelectItem>
-                      <SelectItem value="apache-2.0">Apache 2.0</SelectItem>
-                      <SelectItem value="gpl-3.0">GPL v3.0</SelectItem>
-                      <SelectItem value="cc-by-4.0">Creative Commons BY 4.0</SelectItem>
-                      <SelectItem value="custom">Custom License</SelectItem>
-                    </SelectContent>
-                  </Select>
                   
-                  {formData.externalSource.license === "custom" && (
-                    <Input
-                      placeholder="Specify custom license"
-                      className="mt-2"
-                      onChange={(e) => updateExternalSource('license', e.target.value)}
-                    />
-                  )}
-                </div>
-
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded">
-                  <p className="text-sm text-blue-800">
-                    <strong>Attribution Notice:</strong> This challenge will be displayed with proper 
-                    attribution to the original author and CTF platform.
-                  </p>
+                  <div>
+                    <Label htmlFor="license">License</Label>
+                    <Select 
+                      value={formData.externalSource.license} 
+                      onValueChange={(value) => updateExternalSource('license', value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unknown">Unknown</SelectItem>
+                        <SelectItem value="creative-commons">Creative Commons</SelectItem>
+                        <SelectItem value="mit">MIT License</SelectItem>
+                        <SelectItem value="apache">Apache License</SelectItem>
+                        <SelectItem value="gpl">GPL</SelectItem>
+                        <SelectItem value="custom">Custom License</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Multiple Questions Toggle */}
-          <div className="flex items-center justify-between p-4 border rounded-lg">
-            <div>
-              <Label htmlFor="multipleQuestions" className="text-base">Multiple Questions Challenge</Label>
-              <p className="text-sm text-muted-foreground">
-                Enable if this challenge contains multiple sub-questions with separate flags
-              </p>
+          {/* Challenge Type Selection */}
+          <div className="space-y-4 p-4 border rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Shield className="w-5 h-5" />
+                <Label className="text-base">Challenge Type</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Switch
+                  checked={formData.hasMultipleQuestions}
+                  onCheckedChange={(checked) => {
+                    setFormData({...formData, hasMultipleQuestions: checked});
+                    if (checked && questions.length === 0) {
+                      setQuestions([{ 
+                        id: "1", 
+                        question: "", 
+                        points: 10, 
+                        flag: "", 
+                        flagFormat: "",
+                        hints: [],
+                        files: [],
+                        expanded: true
+                      }]);
+                    }
+                  }}
+                />
+                <Label>Multi-Question Challenge</Label>
+              </div>
             </div>
-            <Switch
-              id="multipleQuestions"
-              checked={formData.hasMultipleQuestions}
-              onCheckedChange={(checked) => setFormData({...formData, hasMultipleQuestions: checked})}
-            />
+            
+            <p className="text-sm text-muted-foreground">
+              {formData.hasMultipleQuestions 
+                ? "This challenge will contain multiple questions with individual flags and points."
+                : "This challenge will have a single flag to solve."
+              }
+            </p>
           </div>
 
-          {/* Multiple Questions Section */}
+          {/* Single Flag Section */}
+          {!formData.hasMultipleQuestions && (
+            <div className="space-y-4 p-4 border rounded-lg">
+              <div className="flex items-center space-x-2">
+                <Flag className="w-5 h-5" />
+                <Label className="text-base">Flag Configuration</Label>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="flag">Flag *</Label>
+                  <Input
+                    id="flag"
+                    value={formData.flag}
+                    onChange={(e) => setFormData({...formData, flag: e.target.value})}
+                    placeholder="CTF{example_flag}"
+                    className="font-mono"
+                    required
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    The exact flag users need to submit to solve the challenge
+                  </p>
+                </div>
+                
+                <div>
+                  <Label htmlFor="flagFormat">Flag Format (Optional)</Label>
+                  <Input
+                    id="flagFormat"
+                    value={formData.flagFormat}
+                    onChange={(e) => setFormData({...formData, flagFormat: e.target.value})}
+                    placeholder="CTF{.*} or flag format hint"
+                    className="font-mono"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Regex or description to help users understand the flag format
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Multi-Question Section */}
           {formData.hasMultipleQuestions && (
             <div className="space-y-4 p-4 border rounded-lg">
               <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-base">Challenge Questions</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Total Points: <strong>{totalPoints}</strong> | Questions: {questions.length}
-                  </p>
+                <div className="flex items-center space-x-2">
+                  <FileText className="w-5 h-5" />
+                  <Label className="text-base">Questions ({questions.length})</Label>
+                  <Badge variant="outline" className="ml-2">
+                    Total Points: {totalPoints}
+                  </Badge>
                 </div>
                 <Button type="button" onClick={addQuestion} variant="outline" size="sm">
                   <Plus className="w-4 h-4 mr-1" />
@@ -991,207 +1278,394 @@ const ChallengeCreation = ({ onBack, onChallengeCreated, eventId, eventName }: C
                 </Button>
               </div>
               
-              {questions.map((question, index) => (
-                <div key={question.id} className="p-4 border rounded-lg space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label>Question {index + 1}</Label>
-                    {questions.length > 1 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeQuestion(question.id)}
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor={`question-${question.id}`}>Question Text *</Label>
-                    <Input
-                      id={`question-${question.id}`}
-                      value={question.question}
-                      onChange={(e) => updateQuestion(question.id, 'question', e.target.value)}
-                      placeholder="Enter the question text"
-                      required
-                    />
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label htmlFor={`points-${question.id}`}>Points *</Label>
-                      <Input
-                        id={`points-${question.id}`}
-                        type="number"
-                        value={question.points}
-                        onChange={(e) => updateQuestion(question.id, 'points', parseInt(e.target.value) || 0)}
-                        min="1"
-                        required
-                      />
-                    </div>
-                    
-                    <div>
-                      <Label htmlFor={`flag-${question.id}`}>Flag *</Label>
-                      <Input
-                        id={`flag-${question.id}`}
-                        value={question.flag}
-                        onChange={(e) => updateQuestion(question.id, 'flag', e.target.value)}
-                        placeholder="Flag for this question"
-                        required
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Single Flag Section */}
-          {!formData.hasMultipleQuestions && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <Label htmlFor="flag">Flag *</Label>
-                <Input
-                  id="flag"
-                  value={formData.flag}
-                  onChange={(e) => setFormData({...formData, flag: e.target.value})}
-                  placeholder="CTF{...} or any flag format"
-                  required
-                />
-              </div>
+              <p className="text-sm text-muted-foreground">
+                Each question can have its own description, flag, points, hints, and files
+              </p>
               
-              <div>
-                <Label htmlFor="flagFormat">Flag Format (Regex)</Label>
-                <Select 
-                  value={formData.flagFormat} 
-                  onValueChange={(value) => setFormData({...formData, flagFormat: value})}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="CTF{.*}">CTF{`{text}`}</SelectItem>
-                    <SelectItem value="FLAG{.*}">FLAG{`{text}`}</SelectItem>
-                    <SelectItem value=".*">Any format</SelectItem>
-                    <SelectItem value="[A-Za-z0-9]{8,}">Alphanumeric (8+ chars)</SelectItem>
-                    <SelectItem value="custom">Custom Regex</SelectItem>
-                  </SelectContent>
-                </Select>
-                
-                {formData.flagFormat === "custom" && (
-                  <Input
-                    placeholder="Enter custom regex pattern"
-                    className="mt-2"
-                    onChange={(e) => setFormData({...formData, flagFormat: e.target.value})}
-                  />
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* File Attachments */}
-          <div className="space-y-4">
-            <Label>Files & Links</Label>
-            <div className="flex gap-2">
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={() => addFileAttachment('file')}
-                disabled={uploadingFiles.size > 0}
-              >
-                <Upload className="w-4 h-4 mr-2" />
-                Upload File
-              </Button>
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={() => addFileAttachment('link')}
-              >
-                <Link className="w-4 h-4 mr-2" />
-                Add Link
-              </Button>
-            </div>
-            
-            {uploadingFiles.size > 0 && (
-              <div className="text-sm text-muted-foreground">
-                Uploading {uploadingFiles.size} file(s)... Please wait.
-              </div>
-            )}
-            
-            {formData.files.length > 0 && (
-              <div className="space-y-2">
-                {formData.files.map((file) => (
-                  <div key={file.id} className="flex items-center justify-between p-3 border rounded">
-                    <div className="flex items-center space-x-2">
-                      {file.type === 'file' ? <FileText className="w-4 h-4" /> : <Link className="w-4 h-4" />}
-                      <span className="text-sm">{file.name}</span>
-                      {file.type === 'link' ? (
-                        <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-xs">
-                          (View Link)
-                        </a>
-                      ) : file.url === "uploading..." ? (
-                        <span className="text-xs text-orange-600">(Uploading...)</span>
-                      ) : (
-                        <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-xs">
-                          (Download)
-                        </a>
-                      )}
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeFile(file.id)}
-                      disabled={file.url === "uploading..."}
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
+              <div className="space-y-4">
+                {questions.map((question, qIndex) => (
+                  <Card key={question.id} className="border">
+                    <CardHeader className="p-4 pb-2 cursor-pointer" onClick={() => toggleQuestionExpanded(question.id)}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <Badge variant="secondary" className="h-6 w-6 flex items-center justify-center p-0">
+                            {qIndex + 1}
+                          </Badge>
+                          <CardTitle className="text-base">
+                            Question {qIndex + 1}
+                            {question.question && (
+                              <span className="text-sm text-muted-foreground ml-2">
+                                - {question.question.substring(0, 50)}...
+                              </span>
+                            )}
+                          </CardTitle>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Badge variant="outline" className="font-mono">
+                            {question.points} pts
+                          </Badge>
+                          {questions.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeQuestion(question.id);
+                              }}
+                              className="h-8 w-8 p-0"
+                            >
+                              <X className="w-4 h-4" />
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleQuestionExpanded(question.id);
+                            }}
+                            className="h-8 w-8 p-0"
+                          >
+                            {question.expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    
+                    {question.expanded && (
+                      <CardContent className="p-4 pt-0 space-y-4">
+                        {/* Question Description */}
+                        <div>
+                          <Label htmlFor={`question-${question.id}`}>Question Text *</Label>
+                          <Textarea
+                            id={`question-${question.id}`}
+                            value={question.question}
+                            onChange={(e) => updateQuestion(question.id, 'question', e.target.value)}
+                            placeholder="Enter the question text or description..."
+                            rows={3}
+                            required
+                          />
+                        </div>
+                        
+                        {/* Points and Flag */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <Label htmlFor={`points-${question.id}`}>Points *</Label>
+                            <Input
+                              id={`points-${question.id}`}
+                              type="number"
+                              value={question.points}
+                              onChange={(e) => updateQuestion(question.id, 'points', parseInt(e.target.value) || 0)}
+                              min="1"
+                              max="1000"
+                              required
+                            />
+                          </div>
+                          
+                          <div>
+                            <Label htmlFor={`flag-${question.id}`}>Flag *</Label>
+                            <Input
+                              id={`flag-${question.id}`}
+                              value={question.flag}
+                              onChange={(e) => updateQuestion(question.id, 'flag', e.target.value)}
+                              placeholder="CTF{question_flag}"
+                              className="font-mono"
+                              required
+                            />
+                          </div>
+                        </div>
+                        
+                        {/* Flag Format */}
+                        <div>
+                          <Label htmlFor={`flagFormat-${question.id}`}>Flag Format (Optional)</Label>
+                          <Input
+                            id={`flagFormat-${question.id}`}
+                            value={question.flagFormat || ''}
+                            onChange={(e) => updateQuestion(question.id, 'flagFormat', e.target.value)}
+                            placeholder="CTF{.*} or flag format hint"
+                            className="font-mono"
+                          />
+                        </div>
+                        
+                        {/* Question Hints */}
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <Label>Question Hints ({question.hints.length})</Label>
+                            <Button
+                              type="button"
+                              onClick={() => addQuestionHint(question.id)}
+                              variant="outline"
+                              size="sm"
+                            >
+                              <Plus className="w-3 h-3 mr-1" />
+                              Add Hint
+                            </Button>
+                          </div>
+                          
+                          {question.hints.map((hint, hintIndex) => (
+                            <div key={hintIndex} className="flex items-center space-x-2">
+                              <div className="flex-1">
+                                <Input
+                                  value={hint}
+                                  onChange={(e) => updateQuestionHint(question.id, hintIndex, e.target.value)}
+                                  placeholder={`Hint ${hintIndex + 1}...`}
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                onClick={() => removeQuestionHint(question.id, hintIndex)}
+                                variant="ghost"
+                                size="sm"
+                                className="h-10 w-10 p-0"
+                              >
+                                <X className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                        
+                        {/* Question Files */}
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <Label>Question Files ({question.files.length})</Label>
+                            <div className="flex space-x-2">
+                              <Button
+                                type="button"
+                                onClick={() => addQuestionFile(question.id, 'link')}
+                                variant="outline"
+                                size="sm"
+                              >
+                                <Link className="w-3 h-3 mr-1" />
+                                Add Link
+                              </Button>
+                              <Button
+                                type="button"
+                                onClick={() => addQuestionFile(question.id, 'file')}
+                                variant="outline"
+                                size="sm"
+                              >
+                                <Upload className="w-3 h-3 mr-1" />
+                                Upload File
+                              </Button>
+                            </div>
+                          </div>
+                          
+                          {question.files.map((file) => (
+                            <div key={file.id} className="flex items-center justify-between p-3 border rounded">
+                              <div className="flex items-center space-x-3 flex-1 min-w-0">
+                                {file.type === 'file' ? (
+                                  <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                                ) : (
+                                  <Link className="w-4 h-4 text-green-600 flex-shrink-0" />
+                                )}
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium truncate">{file.name}</p>
+                                  <p className="text-xs text-muted-foreground truncate">{file.url}</p>
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                onClick={() => removeQuestionFile(question.id, file.id)}
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 flex-shrink-0"
+                              >
+                                <X className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    )}
+                  </Card>
                 ))}
               </div>
-            )}
-          </div>
+              
+              <div className="text-center">
+                <Button type="button" onClick={addQuestion} variant="outline" className="w-full">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Another Question
+                </Button>
+              </div>
+            </div>
+          )}
 
-          {/* Hints Section */}
-          <div>
-            <Label>Hints (Optional)</Label>
-            <div className="space-y-2 mt-2">
+          {/* Global Hints Section */}
+          <div className="space-y-4 p-4 border rounded-lg">
+            <div className="flex items-center space-x-2">
+              <Lightbulb className="w-5 h-5" />
+              <Label className="text-base">Challenge Hints ({formData.hints.filter(h => h.trim()).length})</Label>
+            </div>
+            
+            <p className="text-sm text-muted-foreground">
+              Add hints that apply to the entire challenge. {formData.hasMultipleQuestions && "For per-question hints, add them in each question section above."}
+            </p>
+            
+            <div className="space-y-3">
               {formData.hints.map((hint, index) => (
-                <div key={index} className="flex gap-2">
-                  <Input
-                    value={hint}
-                    onChange={(e) => updateHint(index, e.target.value)}
-                    placeholder={`Hint ${index + 1}`}
-                  />
+                <div key={index} className="flex items-center space-x-2">
+                  <div className="flex-1">
+                    <Input
+                      value={hint}
+                      onChange={(e) => updateHint(index, e.target.value)}
+                      placeholder={`Hint ${index + 1}...`}
+                    />
+                  </div>
                   {formData.hints.length > 1 && (
                     <Button
                       type="button"
-                      variant="outline"
                       onClick={() => removeHint(index)}
+                      variant="ghost"
+                      size="sm"
+                      className="h-10 w-10 p-0"
                     >
-                      Remove
+                      <X className="w-4 h-4" />
                     </Button>
                   )}
                 </div>
               ))}
-              <Button type="button" variant="outline" onClick={addHint}>
-                Add Hint
+            </div>
+            
+            <Button type="button" onClick={addHint} variant="outline" className="w-full">
+              <Plus className="w-4 h-4 mr-2" />
+              Add Hint
+            </Button>
+          </div>
+
+          {/* Global Files Section */}
+          <div className="space-y-4 p-4 border rounded-lg">
+            <div className="flex items-center space-x-2">
+              <FileText className="w-5 h-5" />
+              <Label className="text-base">
+                Challenge Files ({formData.files.length})
+                {uploadingFiles.size > 0 && (
+                  <Badge variant="secondary" className="ml-2">
+                    Uploading {uploadingFiles.size}...
+                  </Badge>
+                )}
+              </Label>
+            </div>
+            
+            <p className="text-sm text-muted-foreground">
+              Add files or links that apply to the entire challenge. {formData.hasMultipleQuestions && "For per-question files, add them in each question section above."}
+            </p>
+            
+            <div className="space-y-2">
+              {formData.files.map((file) => (
+                <div key={file.id} className="flex items-center justify-between p-3 border rounded">
+                  <div className="flex items-center space-x-3 flex-1 min-w-0">
+                    {file.type === 'file' ? (
+                      <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                    ) : (
+                      <Link className="w-4 h-4 text-green-600 flex-shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{file.name}</p>
+                      {file.url === "uploading..." ? (
+                        <div className="flex items-center space-x-2">
+                          <div className="animate-spin w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+                          <p className="text-xs text-muted-foreground">Uploading...</p>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground truncate">{file.url}</p>
+                      )}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={() => removeFile(file.id)}
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 flex-shrink-0"
+                    disabled={file.url === "uploading..."}
+                  >
+                    <X className="w-3 h-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+            
+            <div className="flex space-x-2">
+              <Button type="button" onClick={() => addFileAttachment('link')} variant="outline" className="flex-1">
+                <Link className="w-4 h-4 mr-2" />
+                Add Link
+              </Button>
+              <Button type="button" onClick={() => addFileAttachment('file')} variant="outline" className="flex-1">
+                <Upload className="w-4 h-4 mr-2" />
+                Upload Files
               </Button>
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex gap-2 pt-4">
-            <Button type="submit" disabled={loading || uploadingFiles.size > 0}>
-              {loading ? "Creating..." : "Create Challenge"}
+          {/* Submit Buttons */}
+          <div className="flex justify-between pt-4 border-t">
+            <Button type="button" onClick={onBack} variant="outline">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
             </Button>
-            <Button type="button" variant="outline" onClick={resetForm}>
-              Reset Form
-            </Button>
-            <Button type="button" variant="outline" onClick={onBack}>
-              Cancel
-            </Button>
+            <div className="space-x-2">
+              <Button type="button" onClick={resetForm} variant="outline">
+                Reset Form
+              </Button>
+              <Button type="submit" disabled={loading}>
+                {loading ? (
+                  <>
+                    <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                    Creating Challenge...
+                  </>
+                ) : (
+                  <>
+                    <Shield className="w-4 h-4 mr-2" />
+                    Create Challenge
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {/* Summary Section */}
+          <div className="p-4 bg-muted/50 border rounded-lg">
+            <h4 className="font-medium mb-2">Challenge Summary</h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+              <div>
+                <span className="text-muted-foreground">Title:</span>
+                <p className="font-medium truncate">{formData.title || "Not set"}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Category:</span>
+                <p className="font-medium">
+                  {showCustomCategory ? formData.customCategory : formData.category}
+                </p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Difficulty:</span>
+                <p className="font-medium capitalize">{formData.difficulty}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Total Points:</span>
+                <p className="font-medium">{totalPoints}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Type:</span>
+                <p className="font-medium">
+                  {formData.hasMultipleQuestions ? "Multi-Question" : "Single Flag"}
+                </p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Questions:</span>
+                <p className="font-medium">{questions.length}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Hints:</span>
+                <p className="font-medium">{formData.hints.filter(h => h.trim()).length}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Files:</span>
+                <p className="font-medium">{formData.files.length}</p>
+              </div>
+            </div>
           </div>
         </form>
       </CardContent>

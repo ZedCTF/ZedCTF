@@ -205,9 +205,13 @@ const Practice = () => {
     }
   };
 
-  // FIXED: Updated navigation to use new practice route
-  const navigateToChallenge = (challengeId: string) => {
-    navigate(`/practice/challenge/${challengeId}`);
+  // FIXED: Updated navigation to detect multi-question challenges
+  const navigateToChallenge = (challengeId: string, hasMultipleQuestions?: boolean) => {
+    if (hasMultipleQuestions) {
+      navigate(`/practice/multi/${challengeId}`);
+    } else {
+      navigate(`/practice/challenge/${challengeId}`);
+    }
   };
 
   const navigateToLiveEvents = () => {
@@ -231,9 +235,7 @@ const Practice = () => {
 
   // Calculate the number of challenges the current user has solved
   const mySolvesCount = challenges.reduce((sum, challenge) => {
-    // Check if the current user's ID is in the solvedBy array
     const isSolvedByMe = challenge.solvedBy?.includes(user?.uid as string) || false;
-    // Add 1 to the count if the user solved it, otherwise add 0
     return sum + (isSolvedByMe ? 1 : 0);
   }, 0);
 
@@ -296,7 +298,7 @@ const Practice = () => {
                   <div className="text-lg sm:text-2xl font-bold text-green-600">
                     {mySolvesCount}
                   </div>
-                  <div className="text-xs sm:text-sm text-muted-foreground"> My Solves</div>
+                  <div className="text-xs sm:text-sm text-muted-foreground">My Solves</div>
                 </CardContent>
               </Card>
               <Card className="text-center border">
@@ -458,7 +460,7 @@ const Practice = () => {
                     <Card 
                       key={challenge.id}
                       className="border hover:border-primary/50 hover:shadow-lg transition-all cursor-pointer group"
-                      onClick={() => navigateToChallenge(challenge.id)}
+                      onClick={() => navigateToChallenge(challenge.id, challenge.hasMultipleQuestions)}
                     >
                       <CardContent className="p-4 sm:p-6">
                         <div className="flex items-start justify-between mb-2 sm:mb-3">
@@ -483,6 +485,11 @@ const Practice = () => {
                             <Badge variant="outline" className="font-mono font-bold text-xs">
                               {challenge.totalPoints || challenge.points} pts
                             </Badge>
+                            {challenge.hasMultipleQuestions && (
+                              <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-200 text-xs">
+                                Multi-Question
+                              </Badge>
+                            )}
                           </div>
                           {challenge.createdAt && (
                             <div className="text-muted-foreground text-xs">
