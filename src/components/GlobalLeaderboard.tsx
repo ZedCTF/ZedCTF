@@ -3,7 +3,7 @@ import { Trophy, Users, Clock, ArrowLeft, Globe, RefreshCw, ChevronLeft, Chevron
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useEffect, useState } from "react";
 import { db } from "../firebase";
-import { collection, query, orderBy, limit, onSnapshot, getDocs, doc, getDoc } from "firebase/firestore";
+import { collection, query, orderBy, limit, onSnapshot, getDocs } from "firebase/firestore";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +21,6 @@ export interface TopUser {
   institution?: string;
   lastSolvedAt?: any;
   joinDate?: any;
-  lastActive?: any;
 }
 
 const GlobalLeaderboard = () => {
@@ -34,79 +33,33 @@ const GlobalLeaderboard = () => {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(10);
-
-  // Debug function to check specific user
-  const debugUserData = async () => {
-    console.log("🔍 DEBUG: Checking user data in Firestore...");
-    
-    // Test with James Soko's ID from your submission
-    const testUserId = "7JoixKgAxqQFbhGB0uOuMeBf1Gn1";
-    
-    try {
-      const userDoc = await getDoc(doc(db, "users", testUserId));
-      
-      if (userDoc.exists()) {
-        const data = userDoc.data();
-        console.log("✅ User document found:", data);
-        console.log("📊 Key fields:");
-        console.log("  - totalPoints:", data.totalPoints);
-        console.log("  - role:", data.role);
-        console.log("  - lastActive:", data.lastActive);
-        console.log("  - lastSolvedAt:", data.lastSolvedAt);
-        console.log("  - isActive:", data.isActive);
-        console.log("  - displayName:", data.displayName);
-        console.log("  - email:", data.email);
-        console.log("  - All fields:", Object.keys(data));
-      } else {
-        console.log("❌ User document NOT found!");
-      }
-    } catch (error) {
-      console.error("❌ Error fetching user:", error);
-    }
-  };
+  const [itemsPerPage] = useState(10); // Show 10 users per page
 
   // Ranking algorithm with tie-breaking
   const calculateRanks = (usersData: TopUser[]): TopUser[] => {
     if (usersData.length === 0) return [];
     
-    // Filter out admin users and ensure users have points or activity
-    const eligibleUsers = usersData.filter(user => {
-      // Filter out admins
-      if (user.role === 'admin') return false;
-      
-      // Include users with points or recent activity
-      return user.points > 0 || user.lastActive || user.lastSolvedAt;
-    });
-    
-    if (eligibleUsers.length === 0) return [];
+    // Filter out admin users
+    const nonAdminUsers = usersData.filter(user => user.role !== 'admin');
     
     // Sort with tie-breaking logic
-    const sortedUsers = [...eligibleUsers].sort((a, b) => {
+    const sortedUsers = [...nonAdminUsers].sort((a, b) => {
       // 1. Primary sort: points (descending)
       if (b.points !== a.points) {
         return b.points - a.points;
       }
       
-      // 2. Secondary sort: last activity (most recent first)
-      const getTimestamp = (user: TopUser) => {
-        if (user.lastSolvedAt?.toDate) return user.lastSolvedAt.toDate().getTime();
-        if (user.lastActive?.toDate) return user.lastActive.toDate().getTime();
-        if (user.lastSolvedAt?.seconds) return user.lastSolvedAt.seconds * 1000;
-        if (user.lastActive?.seconds) return user.lastActive.seconds * 1000;
-        if (user.joinDate?.toDate) return user.joinDate.toDate().getTime();
-        if (user.joinDate?.seconds) return user.joinDate.seconds * 1000;
-        return 0;
-      };
-      
-      const aTime = getTimestamp(a);
-      const bTime = getTimestamp(b);
+      // 2. Secondary sort: last solved timestamp (descending - most recent first)
+      const aTime = a.lastSolvedAt?.toDate ? a.lastSolvedAt.toDate().getTime() : 
+                   a.joinDate?.toDate ? a.joinDate.toDate().getTime() : 0;
+      const bTime = b.lastSolvedAt?.toDate ? b.lastSolvedAt.toDate().getTime() : 
+                   b.joinDate?.toDate ? b.joinDate.toDate().getTime() : 0;
       
       if (aTime !== bTime) {
         return bTime - aTime; // Most recent first
       }
       
-      // 3. Tertiary sort: name (alphabetical)
+      // 3. Tertiary sort: name (alphabetical) for consistent ordering
       return (a.name || '').localeCompare(b.name || '');
     });
     
@@ -114,23 +67,19 @@ const GlobalLeaderboard = () => {
     const rankedUsers: TopUser[] = [];
     
     sortedUsers.forEach((user, index) => {
+      // Check if this user has the same points as previous user
       if (index === 0) {
+        // First user always gets rank 1
         rankedUsers.push({ ...user, rank: 1 });
       } else if (user.points === sortedUsers[index - 1].points) {
-        // Same points - check timestamps
-        const getTimestamp = (user: TopUser) => {
-          if (user.lastSolvedAt?.toDate) return user.lastSolvedAt.toDate().getTime();
-          if (user.lastActive?.toDate) return user.lastActive.toDate().getTime();
-          if (user.lastSolvedAt?.seconds) return user.lastSolvedAt.seconds * 1000;
-          if (user.lastActive?.seconds) return user.lastActive.seconds * 1000;
-          return 0;
-        };
-        
-        const currentTime = getTimestamp(user);
-        const prevTime = getTimestamp(sortedUsers[index - 1]);
+        // Same points as previous user - check if also same timestamp for true tie
+        const currentTime = user.lastSolvedAt?.toDate ? user.lastSolvedAt.toDate().getTime() : 
+                           user.joinDate?.toDate ? user.joinDate.toDate().getTime() : 0;
+        const prevTime = sortedUsers[index - 1].lastSolvedAt?.toDate ? sortedUsers[index - 1].lastSolvedAt.toDate().getTime() : 
+                        sortedUsers[index - 1].joinDate?.toDate ? sortedUsers[index - 1].joinDate.toDate().getTime() : 0;
         
         if (currentTime === prevTime) {
-          // True tie - same rank
+          // True tie - same rank as previous user
           rankedUsers.push({ ...user, rank: rankedUsers[index - 1].rank });
         } else {
           // Different timestamps - new rank
@@ -145,43 +94,26 @@ const GlobalLeaderboard = () => {
     return rankedUsers;
   };
 
-  // Fetch leaderboard data
+  // Fetch top users from Firestore with additional data for tie-breaking
   const fetchLeaderboardData = async () => {
     try {
-      console.log("📊 Fetching global leaderboard data...");
+      console.log("Fetching global leaderboard data from Firestore...");
       
-      // Try multiple query strategies
-      let usersQuery;
-      
-      try {
-        // Try with isActive filter if index exists
-        usersQuery = query(
-          collection(db, "users"),
-          orderBy("totalPoints", "desc"),
-          limit(100)
-        );
-      } catch (error) {
-        console.log("Using simpler query...");
-        // Fallback to simple query
-        usersQuery = query(
-          collection(db, "users"),
-          orderBy("totalPoints", "desc"),
-          limit(100)
-        );
-      }
+      const usersQuery = query(
+        collection(db, "users"),
+        orderBy("totalPoints", "desc"),
+        limit(100)
+      );
 
-      // Set up real-time listener
       try {
         const unsubscribeListener = onSnapshot(usersQuery, 
           (snapshot) => {
-            console.log("🔄 Real-time update received");
+            console.log("Real-time update received for leaderboard");
             
             if (snapshot.empty) {
-              console.log("No users found");
+              console.log("No users found in database");
               setTopUsers([]);
               setLastUpdated(new Date().toLocaleTimeString());
-              setLoading(false);
-              setIsRefreshing(false);
               return;
             }
 
@@ -192,7 +124,6 @@ const GlobalLeaderboard = () => {
               const userPoints = userData.totalPoints || 0;
               const userRole = userData.role || 'user';
               
-              // Include all users (leaderboard will filter)
               usersData.push({
                 rank: 0,
                 name: userData.displayName || 
@@ -205,25 +136,13 @@ const GlobalLeaderboard = () => {
                 photoURL: userData.photoURL,
                 role: userRole,
                 institution: userData.institution,
-                lastSolvedAt: userData.lastSolvedAt,
-                lastActive: userData.lastActive,
+                lastSolvedAt: userData.lastSolvedAt || userData.lastActive,
                 joinDate: userData.createdAt || userData.joinDate
               });
             });
 
-            console.log(`📈 Total users fetched: ${usersData.length}`);
-            
             const rankedUsers = calculateRanks(usersData);
-            console.log(`🏆 Ranked users: ${rankedUsers.length}`);
-            
-            // Log top 5 for debugging
-            if (rankedUsers.length > 0) {
-              console.log("Top 5 users:", rankedUsers.slice(0, 5).map(u => ({
-                name: u.name,
-                points: u.points,
-                role: u.role
-              })));
-            }
+            console.log(`Real-time update: ${rankedUsers.length} users ranked`);
             
             setTopUsers(rankedUsers);
             setLastUpdated(new Date().toLocaleTimeString());
@@ -231,21 +150,21 @@ const GlobalLeaderboard = () => {
             setIsRefreshing(false);
           },
           (error) => {
-            console.error("❌ Real-time listener error:", error);
+            console.error("Real-time listener error:", error);
             handleOneTimeFetch();
           }
         );
         
         setUnsubscribe(() => unsubscribeListener);
-        console.log("✅ Real-time listener established");
+        return;
         
       } catch (listenerError: any) {
-        console.error("❌ Listener setup error:", listenerError);
+        console.error("Failed to set up real-time listener:", listenerError);
         handleOneTimeFetch();
       }
 
     } catch (error: any) {
-      console.error("❌ Unexpected error:", error);
+      console.error("Unexpected error fetching leaderboard data:", error);
       setTopUsers([]);
       setLoading(false);
       setIsRefreshing(false);
@@ -255,8 +174,6 @@ const GlobalLeaderboard = () => {
   // Fallback one-time fetch
   const handleOneTimeFetch = async () => {
     try {
-      console.log("🔄 Executing one-time fetch...");
-      
       const usersQuery = query(
         collection(db, "users"),
         orderBy("totalPoints", "desc"),
@@ -293,20 +210,19 @@ const GlobalLeaderboard = () => {
           photoURL: userData.photoURL,
           role: userRole,
           institution: userData.institution,
-          lastSolvedAt: userData.lastSolvedAt,
-          lastActive: userData.lastActive,
+          lastSolvedAt: userData.lastSolvedAt || userData.lastActive,
           joinDate: userData.createdAt || userData.joinDate
         });
       });
 
-      console.log(`📈 One-time fetch: ${usersData.length} users`);
-      
       const rankedUsers = calculateRanks(usersData);
+      console.log(`One-time fetch: ${rankedUsers.length} users ranked`);
+      
       setTopUsers(rankedUsers);
       setLastUpdated(new Date().toLocaleTimeString());
       
     } catch (queryError: any) {
-      console.error("❌ One-time fetch error:", queryError);
+      console.error("One-time fetch also failed:", queryError);
       setTopUsers([]);
     } finally {
       setLoading(false);
@@ -316,9 +232,8 @@ const GlobalLeaderboard = () => {
 
   // Handle manual refresh
   const handleRefresh = () => {
-    console.log("🔄 Manual refresh triggered");
     setIsRefreshing(true);
-    setCurrentPage(1);
+    setCurrentPage(1); // Reset to first page on refresh
     
     if (unsubscribe) {
       unsubscribe();
@@ -328,13 +243,13 @@ const GlobalLeaderboard = () => {
     fetchLeaderboardData();
   };
 
-  // Get rank display
+  // Get rank display - different badges for 1st, 2nd, 3rd
   const getRankDisplay = (rank: number) => {
     if (rank === 1) {
       return (
         <div className="flex flex-col items-center justify-center">
-          <div className="w-10 h-10 rounded-full bg-yellow-100 flex items-center justify-center">
-            <Trophy className="w-6 h-6 text-yellow-600" />
+          <div className="w-10 h-10 rounded-full flex items-center justify-center">
+            <Trophy className="w-6 h-6 text-yellow-500" />
           </div>
           <span className="font-bold text-yellow-600 text-lg mt-1">#{rank}</span>
         </div>
@@ -342,8 +257,8 @@ const GlobalLeaderboard = () => {
     } else if (rank === 2) {
       return (
         <div className="flex flex-col items-center justify-center">
-          <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
-            <Trophy className="w-6 h-6 text-gray-500" />
+          <div className="w-10 h-10 rounded-full flex items-center justify-center">
+            <Trophy className="w-6 h-6 text-gray-400" />
           </div>
           <span className="font-bold text-gray-500 text-lg mt-1">#{rank}</span>
         </div>
@@ -351,7 +266,7 @@ const GlobalLeaderboard = () => {
     } else if (rank === 3) {
       return (
         <div className="flex flex-col items-center justify-center">
-          <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center">
             <Trophy className="w-6 h-6 text-amber-600" />
           </div>
           <span className="font-bold text-amber-600 text-lg mt-1">#{rank}</span>
@@ -360,7 +275,7 @@ const GlobalLeaderboard = () => {
     } else {
       return (
         <div className="flex flex-col items-center justify-center">
-          <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center">
             <span className="font-bold text-muted-foreground text-lg">#{rank}</span>
           </div>
         </div>
@@ -417,11 +332,6 @@ const GlobalLeaderboard = () => {
     };
   }, []);
 
-  // Debug effect
-  useEffect(() => {
-    console.log("📊 Leaderboard users updated:", topUsers.length);
-  }, [topUsers]);
-
   if (loading && !isRefreshing) {
     return (
       <>
@@ -429,7 +339,7 @@ const GlobalLeaderboard = () => {
         <section className="pt-20 lg:pt-24 pb-16 bg-muted/20 min-h-screen">
           <div className="container px-4 mx-auto text-center">
             <div className="animate-spin w-16 h-16 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
-            <p className="mt-4 text-muted-foreground">Loading global leaderboard...</p>
+            <p className="mt-4 text-muted-foreground">Loading global leaderboard data...</p>
           </div>
         </section>
         <Footer />
@@ -443,18 +353,6 @@ const GlobalLeaderboard = () => {
       
       <section className="pt-20 lg:pt-24 pb-16 bg-background min-h-screen">
         <div className="container px-4 mx-auto">
-          {/* Debug button - remove in production */}
-          <div className="flex justify-end mb-4">
-            <Button 
-              onClick={debugUserData}
-              variant="outline"
-              size="sm"
-              className="text-xs"
-            >
-              Debug User Data
-            </Button>
-          </div>
-
           <div className="mb-6 lg:mb-8">
             <Button 
               variant="ghost" 
@@ -471,7 +369,7 @@ const GlobalLeaderboard = () => {
                 Global <span className="text-primary">Leaderboard</span>
               </h2>
               <p className="text-muted-foreground text-sm lg:text-base">
-                All users ranked by total points
+                Top performers based on all-time challenge points
               </p>
               <div className="flex items-center justify-center gap-3 mt-3">
                 {lastUpdated && (
@@ -490,9 +388,6 @@ const GlobalLeaderboard = () => {
                   <RefreshCw className={`w-3 h-3 mr-1 ${isRefreshing ? 'animate-spin' : ''}`} />
                   {isRefreshing ? 'Refreshing...' : 'Refresh'}
                 </Button>
-                <Badge variant="secondary" className="text-xs">
-                  Real-time
-                </Badge>
               </div>
             </div>
           </div>
@@ -502,7 +397,7 @@ const GlobalLeaderboard = () => {
               <CardTitle className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
                 <span className="flex items-center gap-2 text-lg lg:text-xl">
                   <Users className="w-4 h-4 lg:w-5 lg:h-5 text-primary" />
-                  Global Ranking
+                  Top Platform Hackers
                 </span>
                 <div className="flex flex-col sm:flex-row items-center gap-2">
                   <span className="text-sm text-muted-foreground">
@@ -520,9 +415,9 @@ const GlobalLeaderboard = () => {
               {topUsers.length === 0 ? (
                 <div className="text-center py-12 lg:py-16 text-muted-foreground">
                   <Trophy className="w-16 h-16 lg:w-20 lg:h-20 mx-auto mb-4 opacity-50" />
-                  <p className="text-base lg:text-lg mb-2">No users found</p>
+                  <p className="text-base lg:text-lg mb-2">No users found in leaderboard</p>
                   <p className="text-sm lg:text-base mb-4">
-                    Users will appear here after they earn points from solving challenges.
+                    Start solving challenges to earn points and appear on the leaderboard!
                   </p>
                   <div className="flex flex-col sm:flex-row gap-3 justify-center">
                     <Button 
@@ -551,7 +446,6 @@ const GlobalLeaderboard = () => {
                             <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Rank</th>
                             <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Player</th>
                             <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Points</th>
-                            <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Role</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
@@ -588,9 +482,6 @@ const GlobalLeaderboard = () => {
                                     <div className="font-semibold text-foreground text-lg hover:text-primary transition-colors">
                                       {user.name}
                                     </div>
-                                    <div className="text-sm text-muted-foreground">
-                                      {user.email}
-                                    </div>
                                   </div>
                                 </div>
                               </td>
@@ -598,11 +489,6 @@ const GlobalLeaderboard = () => {
                                 <div className="text-2xl font-bold text-primary">
                                   {user.points.toLocaleString()}
                                 </div>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <Badge variant={user.role === 'admin' ? 'destructive' : 'secondary'}>
-                                  {user.role || 'user'}
-                                </Badge>
                               </td>
                             </tr>
                           ))}
@@ -644,16 +530,11 @@ const GlobalLeaderboard = () => {
                                   <div className="font-semibold text-foreground text-base hover:text-primary transition-colors">
                                     {user.name}
                                   </div>
-                                  <div className="text-xs text-muted-foreground truncate max-w-[150px]">
-                                    {user.email}
-                                  </div>
                                 </div>
                               </div>
                               <div className="text-right">
                                 <div className="text-xl font-bold text-primary">{user.points.toLocaleString()}</div>
-                                <Badge variant={user.role === 'admin' ? 'destructive' : 'secondary'} className="text-xs mt-1">
-                                  {user.role || 'user'}
-                                </Badge>
+                                <div className="text-xs text-muted-foreground">points</div>
                               </div>
                             </div>
                             <div className="text-xs text-muted-foreground text-center">
@@ -727,7 +608,7 @@ const GlobalLeaderboard = () => {
             </CardContent>
           </Card>
 
-          {/* Debug Info */}
+          {/* Info Card */}
           <div className="max-w-4xl mx-auto mt-8">
             <Card className="border-border bg-muted/20">
               <CardContent className="p-4">
@@ -736,20 +617,18 @@ const GlobalLeaderboard = () => {
                     <Globe className="w-4 h-4 text-primary" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-sm text-foreground mb-1">Leaderboard Info</h4>
+                    <h4 className="font-semibold text-sm text-foreground mb-1">About Global Leaderboard</h4>
                     <p className="text-xs text-muted-foreground">
-                      This leaderboard updates in real-time when users earn points.
+                      This leaderboard tracks overall performance across all events and challenges on the platform. 
+                      Points are accumulated from all completed challenges regardless of event participation.
                       <span className="block mt-1 text-primary font-medium">
-                        ✓ Total users: {topUsers.length}
+                        ✓ Click on any player to view their profile and detailed stats
                       </span>
                       <span className="block mt-1 text-primary font-medium">
-                        ✓ Last update: {lastUpdated}
+                        ✓ Tie-breaking: Users with same points are ranked by most recent activity
                       </span>
                       <span className="block mt-1 text-primary font-medium">
-                        ✓ Filter: Showing non-admin users with points
-                      </span>
-                      <span className="block mt-1 text-primary font-medium">
-                        ✓ Points from: All solved challenges
+                        ✓ Updates in real-time when users earn points
                       </span>
                     </p>
                   </div>

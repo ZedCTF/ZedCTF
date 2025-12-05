@@ -12,7 +12,8 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { 
   Shield, ArrowLeft, Flag, Users, Clock, Star, FileText, Link, 
-  CheckCircle, XCircle, Copy, ExternalLink, Lightbulb, Eye, EyeOff 
+  CheckCircle, XCircle, Copy, ExternalLink, Lightbulb, Eye, EyeOff,
+  Lock
 } from "lucide-react";
 import Navbar from "../../Navbar";
 import Footer from "../../Footer";
@@ -69,6 +70,8 @@ interface QuestionState {
   isSolved: boolean;
   pointsEarned: number;
   submissions: Submission[];
+  userReceivedPoints: boolean;
+  questionId?: string;
 }
 
 const MultiQuestionPracticeChallengeDetails = () => {
@@ -84,10 +87,19 @@ const MultiQuestionPracticeChallengeDetails = () => {
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const [showChallengeHints, setShowChallengeHints] = useState<boolean[]>([]);
 
+  // Check if a question is locked (solved and points awarded)
+  const isQuestionLocked = (questionIndex: number): boolean => {
+    const questionState = questionStates[questionIndex];
+    if (!questionState) return false;
+    
+    // Question is locked if it's solved AND points have been earned
+    return questionState.isSolved && questionState.userReceivedPoints;
+  };
+
   useEffect(() => {
     if (challengeId) {
       fetchChallenge();
-      fetchSubmissions();
+      fetchSubscriptions();
       
       const challengeRef = doc(db, "challenges", challengeId);
       const unsubscribe = onSnapshot(challengeRef, (doc) => {
@@ -107,23 +119,55 @@ const MultiQuestionPracticeChallengeDetails = () => {
   useEffect(() => {
     // Initialize question states when challenge loads
     if (challenge?.hasMultipleQuestions && challenge.questions) {
-      const initialQuestionStates: QuestionState[] = challenge.questions.map((_, index) => ({
+      initializeQuestionStates();
+    }
+  }, [challenge, allSubmissions]);
+
+  const initializeQuestionStates = () => {
+    if (!challenge?.questions) return;
+    
+    const initialQuestionStates: QuestionState[] = challenge.questions.map((question, index) => {
+      // Find submissions for this specific question
+      const questionSubmissions = allSubmissions.filter(sub => {
+        // Try multiple ways to match the submission to the question
+        const matchesIndex = sub.questionIndex === index;
+        const matchesQuestionId = sub.questionId === question.id;
+        const matchesFlag = sub.flag?.trim().toLowerCase() === question.flag?.trim().toLowerCase();
+        
+        return matchesIndex || matchesQuestionId || matchesFlag;
+      });
+      
+      // Check if there's any correct submission
+      const isSolved = questionSubmissions.some(sub => sub.isCorrect);
+      
+      // Find the first correct submission that awarded points
+      const correctSubmissionWithPoints = questionSubmissions.find(sub => 
+        sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0
+      );
+      
+      const pointsEarned = correctSubmissionWithPoints?.pointsAwarded || 0;
+      const userReceivedPoints = pointsEarned > 0;
+      
+      return {
         index,
         flagInput: "",
         isSubmitting: false,
         showHints: new Array(challenge.questions?.[index]?.hints?.length || 0).fill(false),
-        isSolved: false,
-        pointsEarned: 0,
-        submissions: []
-      }));
-      setQuestionStates(initialQuestionStates);
-      
-      // Initialize challenge hints visibility
-      if (challenge.hints) {
-        setShowChallengeHints(new Array(challenge.hints.length).fill(false));
-      }
+        isSolved,
+        pointsEarned,
+        submissions: questionSubmissions,
+        userReceivedPoints,
+        questionId: question.id
+      };
+    });
+    
+    setQuestionStates(initialQuestionStates);
+    
+    // Initialize challenge hints visibility
+    if (challenge.hints) {
+      setShowChallengeHints(new Array(challenge.hints.length).fill(false));
     }
-  }, [challenge]);
+  };
 
   const fetchChallenge = async () => {
     try {
@@ -148,7 +192,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
     }
   };
 
-  const fetchSubmissions = async () => {
+  const fetchSubscriptions = async () => {
     if (!user || !challengeId) return;
 
     try {
@@ -167,32 +211,50 @@ const MultiQuestionPracticeChallengeDetails = () => {
 
       setAllSubmissions(submissionsData);
       
-      // Update question states with their submissions
+      // After fetching submissions, update question states
       if (challenge?.hasMultipleQuestions && challenge.questions) {
-        setQuestionStates(prev => prev.map((qState, index) => {
-          const question = challenge.questions?.[index];
-          const questionSubmissions = submissionsData.filter(sub => 
-            (sub.questionIndex === index) || 
-            (sub.questionId === question?.id) ||
-            (sub.flag === question?.flag)
-          );
-          
-          const isSolved = questionSubmissions.some(sub => sub.isCorrect);
-          const pointsEarned = questionSubmissions
-            .filter(sub => sub.isCorrect && sub.pointsAwarded)
-            .reduce((sum, sub) => sum + (sub.pointsAwarded || 0), 0);
-          
-          return {
-            ...qState,
-            isSolved,
-            pointsEarned,
-            submissions: questionSubmissions
-          };
-        }));
+        updateQuestionStatesWithSubmissions(submissionsData);
       }
     } catch (error) {
       console.error("Error fetching submissions:", error);
     }
+  };
+
+  const updateQuestionStatesWithSubmissions = (submissionsData: Submission[]) => {
+    if (!challenge?.questions) return;
+    
+    setQuestionStates(prev => prev.map((qState, index) => {
+      const question = challenge.questions?.[index];
+      if (!question) return qState;
+      
+      // Find submissions for this specific question
+      const questionSubmissions = submissionsData.filter(sub => {
+        const matchesIndex = sub.questionIndex === index;
+        const matchesQuestionId = sub.questionId === question.id;
+        const matchesFlag = sub.flag?.trim().toLowerCase() === question.flag?.trim().toLowerCase();
+        
+        return matchesIndex || matchesQuestionId || matchesFlag;
+      });
+      
+      // Check if there's any correct submission
+      const isSolved = questionSubmissions.some(sub => sub.isCorrect);
+      
+      // Find the first correct submission that awarded points
+      const correctSubmissionWithPoints = questionSubmissions.find(sub => 
+        sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0
+      );
+      
+      const pointsEarned = correctSubmissionWithPoints?.pointsAwarded || 0;
+      const userReceivedPoints = pointsEarned > 0;
+      
+      return {
+        ...qState,
+        isSolved,
+        pointsEarned,
+        userReceivedPoints,
+        submissions: questionSubmissions
+      };
+    }));
   };
 
   const submitFlag = async (questionIndex: number) => {
@@ -200,6 +262,16 @@ const MultiQuestionPracticeChallengeDetails = () => {
     
     const questionState = questionStates[questionIndex];
     const flagInput = questionState.flagInput;
+    
+    // Check if question is already solved AND user received points (LOCKED)
+    if (isQuestionLocked(questionIndex)) {
+      setMessage({ 
+        type: 'error', 
+        text: 'This question is already solved and locked. You cannot submit another flag.',
+        questionIndex
+      });
+      return;
+    }
     
     if (!flagInput.trim()) {
       setMessage({ type: 'error', text: 'Please enter a flag', questionIndex });
@@ -218,20 +290,23 @@ const MultiQuestionPracticeChallengeDetails = () => {
         throw new Error("Question not found");
       }
 
-      // Check if flag matches
-      const isCorrect = question.flag?.trim() === flagInput.trim();
+      // Check if flag matches (case-insensitive trim)
+      const isCorrect = question.flag?.trim().toLowerCase() === flagInput.trim().toLowerCase();
       
       let pointsToAward = 0;
       if (isCorrect) {
-        // Check if user has already solved this specific question
-        const existingCorrectSubmission = allSubmissions.find(
-          sub => sub.isCorrect && 
-          ((sub.questionIndex === questionIndex) || 
-           (sub.questionId === question.id) ||
-           (sub.flag === question.flag))
-        );
+        // Check if user has already solved this specific question AND received points
+        const existingCorrectSubmissionWithPoints = allSubmissions.find(sub => {
+          const matchesIndex = sub.questionIndex === questionIndex;
+          const matchesQuestionId = sub.questionId === question.id;
+          const matchesFlag = sub.flag?.trim().toLowerCase() === question.flag?.trim().toLowerCase();
+          
+          const matchesQuestion = matchesIndex || matchesQuestionId || matchesFlag;
+          return matchesQuestion && sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0;
+        });
         
-        if (!existingCorrectSubmission) {
+        // Only award points if not already solved with points
+        if (!existingCorrectSubmissionWithPoints) {
           pointsToAward = question.points || 0;
         }
       }
@@ -242,7 +317,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
         challengeTitle: challenge.title,
         userId: user.uid,
         userName: user.displayName || user.email,
-        flag: flagInput,
+        flag: flagInput.trim(),
         isCorrect: isCorrect,
         submittedAt: new Date(),
         pointsAwarded: pointsToAward,
@@ -263,7 +338,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
           });
         }
 
-        // Update user's total points if this is their first solve
+        // Update user's total points if this is their first solve with points
         if (pointsToAward > 0) {
           await updateDoc(doc(db, "users", user.uid), {
             totalPoints: increment(pointsToAward),
@@ -274,29 +349,34 @@ const MultiQuestionPracticeChallengeDetails = () => {
         setMessage({ 
           type: 'success', 
           text: pointsToAward > 0 
-            ? `Question ${questionIndex + 1} solved! +${pointsToAward} points!`
-            : `Question ${questionIndex + 1} solved! (Already solved)`,
+            ? `Question ${questionIndex + 1} solved! +${pointsToAward} points! (Question locked)`
+            : `Question ${questionIndex + 1} solved! (Already solved - no additional points)`,
           questionIndex
         });
         
-        // Clear input for this question
+        // Clear input for this question and mark as solved
         setQuestionStates(prev => prev.map((q, idx) => 
           idx === questionIndex ? { 
             ...q, 
             flagInput: "", 
             isSolved: true,
-            pointsEarned: pointsToAward > 0 ? pointsToAward : q.pointsEarned
+            pointsEarned: pointsToAward > 0 ? pointsToAward : q.pointsEarned,
+            userReceivedPoints: pointsToAward > 0 || q.userReceivedPoints,
+            isSubmitting: false
           } : q
         ));
         
         // Refresh submissions
-        fetchSubmissions();
+        fetchSubscriptions();
       } else {
         setMessage({ 
           type: 'error', 
           text: 'Incorrect flag. Please try again.',
           questionIndex 
         });
+        setQuestionStates(prev => prev.map((q, idx) => 
+          idx === questionIndex ? { ...q, isSubmitting: false } : q
+        ));
       }
     } catch (error) {
       console.error("Error submitting flag:", error);
@@ -305,8 +385,6 @@ const MultiQuestionPracticeChallengeDetails = () => {
         text: 'Failed to submit flag. Please try again.',
         questionIndex 
       });
-    } finally {
-      // Reset submitting state for this question
       setQuestionStates(prev => prev.map((q, idx) => 
         idx === questionIndex ? { ...q, isSubmitting: false } : q
       ));
@@ -314,6 +392,17 @@ const MultiQuestionPracticeChallengeDetails = () => {
   };
 
   const updateQuestionFlagInput = (questionIndex: number, value: string) => {
+    const questionState = questionStates[questionIndex];
+    // Don't allow input if question is already solved and points awarded (LOCKED)
+    if (isQuestionLocked(questionIndex)) {
+      setMessage({ 
+        type: 'error', 
+        text: 'This question is already solved and locked. You cannot submit another flag.',
+        questionIndex
+      });
+      return;
+    }
+    
     setQuestionStates(prev => prev.map((q, idx) => 
       idx === questionIndex ? { ...q, flagInput: value } : q
     ));
@@ -543,8 +632,11 @@ const MultiQuestionPracticeChallengeDetails = () => {
                 {challenge.questions?.map((question, index) => {
                   const qState = questionStates[index] || {
                     isSolved: false,
-                    pointsEarned: 0
+                    pointsEarned: 0,
+                    userReceivedPoints: false
                   };
+                  
+                  const isLocked = isQuestionLocked(index);
                   
                   return (
                     <Button
@@ -556,14 +648,19 @@ const MultiQuestionPracticeChallengeDetails = () => {
                         setActiveTab("question");
                       }}
                       className={`h-8 px-2 sm:px-3 ${
-                        qState.isSolved 
+                        isLocked 
                           ? 'bg-green-500/10 text-green-600 hover:bg-green-500/20 border-green-200' 
-                          : ''
+                          : qState.isSolved 
+                            ? 'bg-green-500/5 text-green-600 hover:bg-green-500/10 border-green-100'
+                            : ''
                       }`}
                     >
                       <div className="flex items-center gap-1">
                         <span className="text-xs">Q{index + 1}</span>
-                        {qState.isSolved && (
+                        {isLocked && (
+                          <Lock className="w-3 h-3" />
+                        )}
+                        {qState.isSolved && !isLocked && (
                           <CheckCircle className="w-3 h-3" />
                         )}
                       </div>
@@ -601,6 +698,9 @@ const MultiQuestionPracticeChallengeDetails = () => {
                     }`}
                   >
                     Question {activeQuestionIndex + 1}
+                    {isQuestionLocked(activeQuestionIndex) && (
+                      <Lock className="w-3 h-3 ml-1 inline" />
+                    )}
                   </button>
                   <button
                     onClick={() => setActiveTab("hints")}
@@ -659,7 +759,15 @@ const MultiQuestionPracticeChallengeDetails = () => {
                       <CardContent className="p-4 sm:p-6">
                         <div className="space-y-3 break-words">
                           <div className="flex items-center justify-between mb-4">
-                            <h3 className="font-bold text-lg">Question {activeQuestionIndex + 1}</h3>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-bold text-lg">Question {activeQuestionIndex + 1}</h3>
+                              {isQuestionLocked(activeQuestionIndex) && (
+                                <Badge className="bg-green-500/10 text-green-600 border-green-200 text-xs">
+                                  <Lock className="w-3 h-3 mr-1" />
+                                  Locked
+                                </Badge>
+                              )}
+                            </div>
                             <Badge variant="outline" className="font-mono font-semibold">
                               {challenge.questions?.[activeQuestionIndex]?.points || 0} pts
                             </Badge>
@@ -681,7 +789,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
                             </div>
                           )}
                           
-                          {/* Show flag if question is solved */}
+                          {/* Show flag if question is solved - EXACTLY like single question */}
                           {questionStates[activeQuestionIndex]?.isSolved && challenge.questions?.[activeQuestionIndex]?.flag && (
                             <div className="p-3 bg-green-500/10 border border-green-200 rounded break-words">
                               <div className="flex items-center justify-between gap-2">
@@ -889,7 +997,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
 
             {/* Sidebar */}
             <div className="space-y-4">
-              {/* Flag Submission */}
+              {/* Flag Submission - EXACTLY like single question */}
               <Card className="border lg:sticky lg:top-4">
                 <CardHeader className="p-4 pb-2">
                   <CardTitle className="flex items-center gap-2 text-base">
@@ -911,42 +1019,56 @@ const MultiQuestionPracticeChallengeDetails = () => {
                     </Alert>
                   )}
 
-                  {!questionStates[activeQuestionIndex]?.isSolved ? (
-                    <div className="space-y-2">
-                      <div className="space-y-1">
-                        <Label htmlFor="flag" className="text-xs font-medium">Enter Flag for Question {activeQuestionIndex + 1}</Label>
-                        <Input
-                          id="flag"
-                          placeholder={challenge.questions?.[activeQuestionIndex]?.flagFormat || "Enter flag..."}
-                          value={questionStates[activeQuestionIndex]?.flagInput || ""}
-                          onChange={(e) => updateQuestionFlagInput(activeQuestionIndex, e.target.value)}
-                          onKeyPress={(e) => e.key === 'Enter' && submitFlag(activeQuestionIndex)}
-                          className="font-mono text-sm h-9"
-                        />
+                  {!isQuestionLocked(activeQuestionIndex) ? (
+                    !questionStates[activeQuestionIndex]?.isSolved ? (
+                      <div className="space-y-2">
+                        <div className="space-y-1">
+                          <Label htmlFor="flag" className="text-xs font-medium">Enter Flag for Question {activeQuestionIndex + 1}</Label>
+                          <Input
+                            id="flag"
+                            placeholder={challenge.questions?.[activeQuestionIndex]?.flagFormat || "Enter flag..."}
+                            value={questionStates[activeQuestionIndex]?.flagInput || ""}
+                            onChange={(e) => updateQuestionFlagInput(activeQuestionIndex, e.target.value)}
+                            onKeyPress={(e) => e.key === 'Enter' && submitFlag(activeQuestionIndex)}
+                            className="font-mono text-sm h-9"
+                            disabled={questionStates[activeQuestionIndex]?.isSubmitting}
+                          />
+                        </div>
+                        <Button 
+                          onClick={() => submitFlag(activeQuestionIndex)} 
+                          disabled={questionStates[activeQuestionIndex]?.isSubmitting || !questionStates[activeQuestionIndex]?.flagInput?.trim()}
+                          className="w-full h-9"
+                          variant="terminal"
+                        >
+                          {questionStates[activeQuestionIndex]?.isSubmitting ? (
+                            <>
+                              <div className="animate-spin w-3 h-3 border border-white border-t-transparent rounded-full mr-2"></div>
+                              Checking...
+                            </>
+                          ) : (
+                            <>
+                              <Shield className="w-3 h-3 mr-1" />
+                              Submit Flag
+                            </>
+                          )}
+                        </Button>
                       </div>
-                      <Button 
-                        onClick={() => submitFlag(activeQuestionIndex)} 
-                        disabled={questionStates[activeQuestionIndex]?.isSubmitting || !questionStates[activeQuestionIndex]?.flagInput?.trim()}
-                        className="w-full h-9"
-                        variant="terminal"
-                      >
-                        {questionStates[activeQuestionIndex]?.isSubmitting ? (
-                          <>
-                            <div className="animate-spin w-3 h-3 border border-white border-t-transparent rounded-full mr-2"></div>
-                            Checking...
-                          </>
-                        ) : (
-                          <>
-                            <Shield className="w-3 h-3 mr-1" />
-                            Submit Flag
-                          </>
-                        )}
-                      </Button>
-                    </div>
+                    ) : (
+                      <div className="text-center p-3 bg-yellow-500/10 border border-yellow-200 rounded">
+                        <CheckCircle className="w-8 h-8 text-yellow-600 mx-auto mb-1" />
+                        <p className="text-yellow-600 font-semibold text-sm">Question Already Solved</p>
+                        <p className="text-yellow-600 text-xs mt-1">
+                          You've solved this but didn't receive points
+                        </p>
+                      </div>
+                    )
                   ) : (
                     <div className="text-center p-3 bg-green-500/10 border border-green-200 rounded">
                       <CheckCircle className="w-8 h-8 text-green-600 mx-auto mb-1" />
-                      <p className="text-green-600 font-semibold text-sm">Question Solved!</p>
+                      <p className="text-green-600 font-semibold text-sm">Question Locked!</p>
+                      <p className="text-green-600 text-xs mt-1">
+                        You've already solved this question and received points
+                      </p>
                       {questionStates[activeQuestionIndex]?.pointsEarned > 0 && (
                         <p className="text-green-600 text-xs mt-1">
                           +{questionStates[activeQuestionIndex].pointsEarned} points earned
@@ -978,6 +1100,12 @@ const MultiQuestionPracticeChallengeDetails = () => {
                       <span className="text-muted-foreground">Points Earned</span>
                       <span className="font-semibold">{totalPointsEarned}/{challenge.totalPoints || challenge.points}</span>
                     </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Locked Questions</span>
+                      <span className="font-semibold">
+                        {questionStates.filter(q => q.isSolved && q.userReceivedPoints).length}/{questionProgress?.total || 0}
+                      </span>
+                    </div>
                     {isFullySolved && (
                       <div className="text-center p-2 bg-green-500/10 border border-green-200 rounded mt-2">
                         <p className="text-green-600 font-semibold text-xs">All Questions Solved! 🎉</p>
@@ -1002,14 +1130,18 @@ const MultiQuestionPracticeChallengeDetails = () => {
                         <div key={submission.id} className="flex items-center justify-between p-2 border rounded text-xs">
                           <div className="flex items-center gap-1 flex-1 min-w-0">
                             {submission.isCorrect ? (
-                              <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />
+                              submission.pointsAwarded && submission.pointsAwarded > 0 ? (
+                                <Lock className="w-3 h-3 text-green-600 flex-shrink-0" />
+                              ) : (
+                                <CheckCircle className="w-3 h-3 text-green-600 flex-shrink-0" />
+                              )
                             ) : (
                               <XCircle className="w-3 h-3 text-red-600 flex-shrink-0" />
                             )}
                             <code className="truncate font-mono text-xs">{submission.flag}</code>
                             {submission.pointsAwarded && submission.pointsAwarded > 0 && (
                               <Badge variant="outline" className="ml-1 text-xs bg-green-500/10 text-green-600">
-                                +{submission.pointsAwarded}
+                                +{submission.pointsAwarded} pts
                               </Badge>
                             )}
                           </div>
