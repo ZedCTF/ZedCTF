@@ -98,8 +98,19 @@ const MultiQuestionPracticeChallengeDetails = () => {
 
   useEffect(() => {
     if (challengeId) {
-      fetchChallenge();
-      fetchSubscriptions();
+      const fetchData = async () => {
+        try {
+          setLoading(true);
+          await fetchChallenge();
+          await fetchSubscriptions();
+        } catch (error) {
+          console.error("Error fetching data:", error);
+          setMessage({ type: 'error', text: 'Failed to load challenge data' });
+        } finally {
+          setLoading(false);
+        }
+      };
+      fetchData();
       
       const challengeRef = doc(db, "challenges", challengeId);
       const unsubscribe = onSnapshot(challengeRef, (doc) => {
@@ -126,15 +137,35 @@ const MultiQuestionPracticeChallengeDetails = () => {
   const initializeQuestionStates = () => {
     if (!challenge?.questions) return;
     
+    console.log("Initializing question states with submissions:", allSubmissions.length);
+    console.log("Challenge questions:", challenge.questions.map((q, i) => ({ index: i, flag: q.flag, id: q.id })));
+    
     const initialQuestionStates: QuestionState[] = challenge.questions.map((question, index) => {
       // Find submissions for this specific question
       const questionSubmissions = allSubmissions.filter(sub => {
         // Try multiple ways to match the submission to the question
         const matchesIndex = sub.questionIndex === index;
         const matchesQuestionId = sub.questionId === question.id;
-        const matchesFlag = sub.flag?.trim().toLowerCase() === question.flag?.trim().toLowerCase();
         
-        return matchesIndex || matchesQuestionId || matchesFlag;
+        // IMPORTANT: Check if the submission flag matches the question flag
+        const submissionFlag = sub.flag?.trim().toLowerCase();
+        const questionFlag = question.flag?.trim().toLowerCase();
+        const matchesFlag = questionFlag && submissionFlag === questionFlag;
+        
+        const isMatch = matchesIndex || matchesQuestionId || matchesFlag;
+        
+        if (isMatch && sub.isCorrect) {
+          console.log(`Found correct submission for question ${index}:`, {
+            submissionFlag,
+            questionFlag,
+            matchesIndex,
+            matchesQuestionId,
+            matchesFlag,
+            submission: sub
+          });
+        }
+        
+        return isMatch;
       });
       
       // Check if there's any correct submission
@@ -147,6 +178,8 @@ const MultiQuestionPracticeChallengeDetails = () => {
       
       const pointsEarned = correctSubmissionWithPoints?.pointsAwarded || 0;
       const userReceivedPoints = pointsEarned > 0;
+      
+      console.log(`Question ${index} - Solved: ${isSolved}, Points: ${pointsEarned}, Locked: ${userReceivedPoints}, Submissions: ${questionSubmissions.length}`);
       
       return {
         index,
@@ -171,8 +204,6 @@ const MultiQuestionPracticeChallengeDetails = () => {
 
   const fetchChallenge = async () => {
     try {
-      setLoading(true);
-      
       const challengeDoc = await getDoc(doc(db, "challenges", challengeId!));
       
       if (challengeDoc.exists()) {
@@ -187,15 +218,20 @@ const MultiQuestionPracticeChallengeDetails = () => {
     } catch (error) {
       console.error("Error fetching challenge:", error);
       setMessage({ type: 'error', text: 'Failed to load challenge' });
-    } finally {
-      setLoading(false);
+      throw error;
     }
   };
 
   const fetchSubscriptions = async () => {
-    if (!user || !challengeId) return;
+    if (!user || !challengeId) {
+      console.log("No user or challengeId, skipping submissions fetch");
+      setAllSubmissions([]);
+      return;
+    }
 
     try {
+      console.log("Fetching submissions for user:", user.uid, "challenge:", challengeId);
+      
       const submissionsQuery = query(
         collection(db, "submissions"),
         where("challengeId", "==", challengeId),
@@ -209,52 +245,20 @@ const MultiQuestionPracticeChallengeDetails = () => {
         ...doc.data()
       })) as Submission[];
 
-      setAllSubmissions(submissionsData);
+      console.log("Fetched submissions:", submissionsData.map(s => ({
+        id: s.id,
+        flag: s.flag,
+        isCorrect: s.isCorrect,
+        pointsAwarded: s.pointsAwarded,
+        questionIndex: s.questionIndex,
+        questionId: s.questionId
+      })));
       
-      // After fetching submissions, update question states
-      if (challenge?.hasMultipleQuestions && challenge.questions) {
-        updateQuestionStatesWithSubmissions(submissionsData);
-      }
+      setAllSubmissions(submissionsData);
     } catch (error) {
       console.error("Error fetching submissions:", error);
+      setAllSubmissions([]);
     }
-  };
-
-  const updateQuestionStatesWithSubmissions = (submissionsData: Submission[]) => {
-    if (!challenge?.questions) return;
-    
-    setQuestionStates(prev => prev.map((qState, index) => {
-      const question = challenge.questions?.[index];
-      if (!question) return qState;
-      
-      // Find submissions for this specific question
-      const questionSubmissions = submissionsData.filter(sub => {
-        const matchesIndex = sub.questionIndex === index;
-        const matchesQuestionId = sub.questionId === question.id;
-        const matchesFlag = sub.flag?.trim().toLowerCase() === question.flag?.trim().toLowerCase();
-        
-        return matchesIndex || matchesQuestionId || matchesFlag;
-      });
-      
-      // Check if there's any correct submission
-      const isSolved = questionSubmissions.some(sub => sub.isCorrect);
-      
-      // Find the first correct submission that awarded points
-      const correctSubmissionWithPoints = questionSubmissions.find(sub => 
-        sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0
-      );
-      
-      const pointsEarned = correctSubmissionWithPoints?.pointsAwarded || 0;
-      const userReceivedPoints = pointsEarned > 0;
-      
-      return {
-        ...qState,
-        isSolved,
-        pointsEarned,
-        userReceivedPoints,
-        submissions: questionSubmissions
-      };
-    }));
   };
 
   const submitFlag = async (questionIndex: number) => {
@@ -299,7 +303,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
         const existingCorrectSubmissionWithPoints = allSubmissions.find(sub => {
           const matchesIndex = sub.questionIndex === questionIndex;
           const matchesQuestionId = sub.questionId === question.id;
-          const matchesFlag = sub.flag?.trim().toLowerCase() === question.flag?.trim().toLowerCase();
+          const matchesFlag = question.flag && sub.flag?.trim().toLowerCase() === question.flag?.trim().toLowerCase();
           
           const matchesQuestion = matchesIndex || matchesQuestionId || matchesFlag;
           return matchesQuestion && sub.isCorrect && sub.pointsAwarded && sub.pointsAwarded > 0;
@@ -328,7 +332,8 @@ const MultiQuestionPracticeChallengeDetails = () => {
         questionPoints: question.points
       };
 
-      await addDoc(collection(db, "submissions"), submissionData);
+      console.log("Submitting flag:", submissionData);
+      const submissionRef = await addDoc(collection(db, "submissions"), submissionData);
 
       if (isCorrect) {
         // Update challenge solvedBy array if not already included
@@ -366,8 +371,13 @@ const MultiQuestionPracticeChallengeDetails = () => {
           } : q
         ));
         
-        // Refresh submissions
-        fetchSubscriptions();
+        // Add the new submission to allSubmissions immediately
+        const newSubmission: Submission = {
+          id: submissionRef.id,
+          ...submissionData
+        };
+        setAllSubmissions(prev => [newSubmission, ...prev]);
+        
       } else {
         setMessage({ 
           type: 'error', 
@@ -637,6 +647,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
                   };
                   
                   const isLocked = isQuestionLocked(index);
+                  const isSolved = qState.isSolved;
                   
                   return (
                     <Button
@@ -650,7 +661,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
                       className={`h-8 px-2 sm:px-3 ${
                         isLocked 
                           ? 'bg-green-500/10 text-green-600 hover:bg-green-500/20 border-green-200' 
-                          : qState.isSolved 
+                          : isSolved 
                             ? 'bg-green-500/5 text-green-600 hover:bg-green-500/10 border-green-100'
                             : ''
                       }`}
@@ -660,7 +671,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
                         {isLocked && (
                           <Lock className="w-3 h-3" />
                         )}
-                        {qState.isSolved && !isLocked && (
+                        {isSolved && !isLocked && (
                           <CheckCircle className="w-3 h-3" />
                         )}
                       </div>
