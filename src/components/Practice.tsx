@@ -8,7 +8,31 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Search, Shield, Zap, Users, Clock, RefreshCw, AlertCircle, FolderOpen, ChevronRight, Filter, X } from "lucide-react";
+import { 
+  Search, 
+  Shield, 
+  Zap, 
+  Users, 
+  Clock, 
+  RefreshCw, 
+  AlertCircle, 
+  FolderOpen, 
+  ChevronRight, 
+  Filter, 
+  X,
+  Globe,
+  Key,
+  Eye,
+  Binary,
+  Search as SearchIcon,
+  Package,
+  Cpu,
+  Image,
+  Smartphone,
+  Server,
+  Wifi,
+  Network
+} from "lucide-react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 
@@ -45,7 +69,7 @@ interface Challenge {
 interface Category {
   name: string;
   count: number;
-  icon: string;
+  icon: JSX.Element;
   color: string;
   description: string;
 }
@@ -69,6 +93,208 @@ const Practice = () => {
   useEffect(() => {
     filterChallenges();
   }, [searchTerm, selectedCategory, challenges]);
+
+  const getCategoryIcon = (categoryName: string): JSX.Element => {
+    const name = categoryName.toLowerCase();
+    
+    // Web Exploitation/Web Security
+    if (name.includes('web') || name.includes('xss') || name.includes('sqli') || 
+        name.includes('csrf') || name.includes('ssrf') || name.includes('idor')) {
+      return <Globe className="w-5 h-5" />;
+    }
+    
+    // Network Security (wired/wireless)
+    if (name.includes('network') || name.includes('netsec') || name.includes('net') ||
+        name.includes('wifi') || name.includes('wireless') || name.includes('packet') ||
+        name.includes('tcp') || name.includes('ip') || name.includes('dns') ||
+        name.includes('router') || name.includes('switch') || name.includes('firewall')) {
+      return <Network className="w-5 h-5" />;
+    }
+    
+    // Forensics
+    if (name.includes('forensic')) {
+      return <Eye className="w-5 h-5" />;
+    }
+    
+    // Cryptography/crypto
+    if (name.includes('crypto') || name.includes('cryptography') || name.includes('encrypt')) {
+      return <Key className="w-5 h-5" />;
+    }
+    
+    // Reverse Engineering/rev
+    if (name.includes('reverse') || name.includes('rev') || name.includes('reversing')) {
+      return <Binary className="w-5 h-5" />;
+    }
+    
+    // OSINT
+    if (name.includes('osint')) {
+      return <SearchIcon className="w-5 h-5" />;
+    }
+    
+    // Misc
+    if (name.includes('misc') || name.includes('miscellaneous')) {
+      return <Package className="w-5 h-5" />;
+    }
+    
+    // Pwn/Binary Exploitation/Machines
+    if (name.includes('pwn') || name.includes('binary') || name.includes('exploitation') || 
+        name.includes('machine') || name.includes('buffer') || name.includes('overflow') ||
+        name.includes('rop') || name.includes('shellcode')) {
+      return <Cpu className="w-5 h-5" />;
+    }
+    
+    // Steganography/stega
+    if (name.includes('steganography') || name.includes('stega')) {
+      return <Image className="w-5 h-5" />;
+    }
+    
+    // Mobile Security
+    if (name.includes('mobile') || name.includes('android') || name.includes('ios') ||
+        name.includes('app') || name.includes('apk')) {
+      return <Smartphone className="w-5 h-5" />;
+    }
+    
+    // OS Security (Windows/Linux/Mac)
+    if (name.includes('windows') || name.includes('linux') || name.includes('mac') ||
+        name.includes('os') || name.includes('operating') || name.includes('kernel')) {
+      return <Server className="w-5 h-5" />;
+    }
+    
+    // Default icon for custom/unrecognized categories
+    return <Shield className="w-5 h-5" />;
+  };
+
+  const getCategoryColor = (categoryName: string): string => {
+    const name = categoryName.toLowerCase();
+    
+    // Web Exploitation/Security
+    if (name.includes('web') || name.includes('xss') || name.includes('sqli') || 
+        name.includes('csrf') || name.includes('ssrf') || name.includes('idor')) {
+      return "from-blue-500 to-cyan-500";
+    }
+    
+    // Network Security
+    if (name.includes('network') || name.includes('netsec') || name.includes('net') ||
+        name.includes('wifi') || name.includes('wireless') || name.includes('packet')) {
+      return "from-teal-500 to-green-500";
+    }
+    
+    // Forensics
+    if (name.includes('forensic')) {
+      return "from-orange-500 to-red-500";
+    }
+    
+    // Cryptography/crypto
+    if (name.includes('crypto') || name.includes('cryptography') || name.includes('encrypt')) {
+      return "from-purple-500 to-pink-500";
+    }
+    
+    // Reverse Engineering/rev
+    if (name.includes('reverse') || name.includes('rev') || name.includes('reversing')) {
+      return "from-indigo-500 to-purple-500";
+    }
+    
+    // OSINT
+    if (name.includes('osint')) {
+      return "from-green-500 to-emerald-500";
+    }
+    
+    // Misc
+    if (name.includes('misc') || name.includes('miscellaneous')) {
+      return "from-gray-500 to-slate-500";
+    }
+    
+    // Pwn/Binary Exploitation/Machines
+    if (name.includes('pwn') || name.includes('binary') || name.includes('exploitation') || 
+        name.includes('machine')) {
+      return "from-red-500 to-rose-500";
+    }
+    
+    // Steganography/stega
+    if (name.includes('steganography') || name.includes('stega')) {
+      return "from-pink-500 to-rose-500";
+    }
+    
+    // Mobile Security
+    if (name.includes('mobile') || name.includes('android') || name.includes('ios')) {
+      return "from-teal-500 to-cyan-500";
+    }
+    
+    // OS Security
+    if (name.includes('windows') || name.includes('linux') || name.includes('mac') ||
+        name.includes('os') || name.includes('operating')) {
+      return "from-slate-500 to-gray-500";
+    }
+    
+    // Default color for custom/unrecognized categories
+    return "from-gray-500 to-slate-500";
+  };
+
+  const getCategoryDescription = (categoryName: string): string => {
+    const name = categoryName.toLowerCase();
+    
+    // Web Exploitation/Security
+    if (name.includes('web') || name.includes('xss') || name.includes('sqli') || 
+        name.includes('csrf') || name.includes('ssrf') || name.includes('idor')) {
+      return "Web application vulnerabilities, XSS, SQL injection, CSRF, and more";
+    }
+    
+    // Network Security
+    if (name.includes('network') || name.includes('netsec') || name.includes('net') ||
+        name.includes('wifi') || name.includes('wireless') || name.includes('packet')) {
+      return "Network protocols, packet analysis, wireless security, and network attacks";
+    }
+    
+    // Forensics
+    if (name.includes('forensic')) {
+      return "Digital forensics, file analysis, memory analysis, and data recovery";
+    }
+    
+    // Cryptography/crypto
+    if (name.includes('crypto') || name.includes('cryptography') || name.includes('encrypt')) {
+      return "Cryptography, encryption algorithms, cryptographic attacks, and hashing";
+    }
+    
+    // Reverse Engineering/rev
+    if (name.includes('reverse') || name.includes('rev') || name.includes('reversing')) {
+      return "Reverse engineering, malware analysis, and binary analysis";
+    }
+    
+    // OSINT
+    if (name.includes('osint')) {
+      return "Open Source Intelligence gathering and information analysis";
+    }
+    
+    // Misc
+    if (name.includes('misc') || name.includes('miscellaneous')) {
+      return "Miscellaneous challenges covering various security topics";
+    }
+    
+    // Pwn/Binary Exploitation/Machines
+    if (name.includes('pwn') || name.includes('binary') || name.includes('exploitation') || 
+        name.includes('machine')) {
+      return "Binary exploitation, memory corruption, buffer overflows, and ROP chains";
+    }
+    
+    // Steganography/stega
+    if (name.includes('steganography') || name.includes('stega')) {
+      return "Steganography, hidden data in files, and image analysis";
+    }
+    
+    // Mobile Security
+    if (name.includes('mobile') || name.includes('android') || name.includes('ios')) {
+      return "Mobile application security, APK analysis, and mobile OS vulnerabilities";
+    }
+    
+    // OS Security
+    if (name.includes('windows') || name.includes('linux') || name.includes('mac') ||
+        name.includes('os') || name.includes('operating')) {
+      return "Operating system security, privilege escalation, and kernel exploits";
+    }
+    
+    // Default description for custom/unrecognized categories
+    return "Cybersecurity challenges and exercises";
+  };
 
   const fetchPracticeChallenges = async () => {
     try {
@@ -107,52 +333,13 @@ const Practice = () => {
       categoryMap.set(category, (categoryMap.get(category) || 0) + 1);
     });
 
-    const categoryData: { [key: string]: { color: string; icon: string; description: string } } = {
-      web: {
-        color: "from-blue-500 to-cyan-500",
-        icon: "🌐",
-        description: "Web application security, SQL injection, XSS, and more"
-      },
-      crypto: {
-        color: "from-purple-500 to-pink-500", 
-        icon: "🔐",
-        description: "Cryptography, encryption, and cryptographic attacks"
-      },
-      forensics: {
-        color: "from-orange-500 to-red-500",
-        icon: "🔍",
-        description: "Digital forensics, file analysis, and data recovery"
-      },
-      pwn: {
-        color: "from-red-500 to-rose-500",
-        icon: "💥", 
-        description: "Binary exploitation, memory corruption, and reverse engineering"
-      },
-      reversing: {
-        color: "from-indigo-500 to-purple-500",
-        icon: "⚡",
-        description: "Reverse engineering and malware analysis"
-      },
-      misc: {
-        color: "from-gray-500 to-slate-500",
-        icon: "📦",
-        description: "Miscellaneous challenges and various security topics"
-      }
-    };
-
     const categoriesList: Category[] = Array.from(categoryMap.entries()).map(([name, count]) => {
-      const categoryInfo = categoryData[name.toLowerCase()] || {
-        color: "from-gray-500 to-slate-500",
-        icon: "📁",
-        description: "Various security challenges"
-      };
-
       return {
         name,
         count,
-        icon: categoryInfo.icon,
-        color: categoryInfo.color,
-        description: categoryInfo.description
+        icon: getCategoryIcon(name),
+        color: getCategoryColor(name),
+        description: getCategoryDescription(name)
       };
     });
 
@@ -394,7 +581,7 @@ const Practice = () => {
                     >
                       <CardContent className="p-4 sm:p-6">
                         <div className="flex items-center justify-between mb-3">
-                          <div className={`text-xl sm:text-2xl bg-gradient-to-r ${category.color} rounded-lg p-2 sm:p-3`}>
+                          <div className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-r ${category.color} rounded-lg p-2 sm:p-3 text-white`}>
                             {category.icon}
                           </div>
                           <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground group-hover:text-primary transition-colors" />
@@ -402,8 +589,11 @@ const Practice = () => {
                         <h3 className="font-bold text-base sm:text-lg mb-1 group-hover:text-primary transition-colors">
                           {category.name}
                         </h3>
-                        <p className="text-muted-foreground text-xs sm:text-sm">
+                        <p className="text-muted-foreground text-xs sm:text-sm mb-2">
                           {category.count} challenge{category.count !== 1 ? 's' : ''}
+                        </p>
+                        <p className="text-muted-foreground text-xs line-clamp-2">
+                          {category.description}
                         </p>
                       </CardContent>
                     </Card>
@@ -437,11 +627,16 @@ const Practice = () => {
                     <ChevronRight className="w-3 h-3 sm:w-4 sm:h-4 rotate-180" />
                     Back
                   </Button>
-                  <div>
-                    <h2 className="text-xl font-bold">{selectedCategory} Challenges</h2>
-                    <p className="text-muted-foreground text-sm">
-                      {filteredChallenges.length} challenge{filteredChallenges.length !== 1 ? 's' : ''} available
-                    </p>
+                  <div className="flex items-center gap-2">
+                    <div className={`flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-r ${getCategoryColor(selectedCategory)} rounded-lg p-2 text-white`}>
+                      {getCategoryIcon(selectedCategory)}
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold">{selectedCategory} Challenges</h2>
+                      <p className="text-muted-foreground text-sm">
+                        {filteredChallenges.length} challenge{filteredChallenges.length !== 1 ? 's' : ''} available
+                      </p>
+                    </div>
                   </div>
                 </div>
                 <div className="flex gap-1 sm:gap-2">
