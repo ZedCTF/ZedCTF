@@ -51,6 +51,8 @@ interface Challenge {
   challengeType?: 'practice' | 'live' | 'past_event' | 'upcoming';
   finalCategory?: string;
   flag?: string;
+  hasMultipleQuestions?: boolean;
+  questions?: any[];
 }
 
 interface UserScore {
@@ -79,7 +81,6 @@ const LiveEventDetails = () => {
   const [eventSolvedChallenges, setEventSolvedChallenges] = useState<Set<string>>(new Set());
   const [leaderboard, setLeaderboard] = useState<UserScore[]>([]);
   const [loading, setLoading] = useState(true);
-  const [registering, setRegistering] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [isRegistered, setIsRegistered] = useState(false);
   const [isEventOwner, setIsEventOwner] = useState(false);
@@ -253,7 +254,9 @@ const LiveEventDetails = () => {
             isActive: data.isActive,
             eventId: data.eventId,
             challengeType: data.challengeType,
-            flag: data.flag
+            flag: data.flag,
+            hasMultipleQuestions: data.hasMultipleQuestions || false,
+            questions: data.questions || []
           });
         });
         console.log("✅ Found active challenges:", challengesData.length);
@@ -285,7 +288,9 @@ const LiveEventDetails = () => {
               isActive: data.isActive,
               eventId: data.eventId,
               challengeType: data.challengeType,
-              flag: data.flag
+              flag: data.flag,
+              hasMultipleQuestions: data.hasMultipleQuestions || false,
+              questions: data.questions || []
             });
           });
           console.log("👑 Admin found challenges:", adminChallenges.length);
@@ -374,18 +379,48 @@ const LiveEventDetails = () => {
       
       const eventSubmissionsSnapshot = await getDocs(eventSubmissionsQuery);
       const eventSolvedIds = new Set<string>();
+      const challengeQuestionCounts: Record<string, Set<number>> = {};
       
       console.log("📊 Event-specific correct submissions found:", eventSubmissionsSnapshot.size);
 
       eventSubmissionsSnapshot.forEach(doc => {
         const submission = doc.data();
         const challengeId = submission.challengeId;
+        const questionIndex = submission.questionIndex;
         
         if (challengeId) {
-          console.log(`✅ Found event-specific solved challenge: ${challengeId}`);
-          eventSolvedIds.add(challengeId);
+          if (questionIndex !== undefined && questionIndex !== null) {
+            // This is a question submission for a multi-question challenge
+            if (!challengeQuestionCounts[challengeId]) {
+              challengeQuestionCounts[challengeId] = new Set<number>();
+            }
+            challengeQuestionCounts[challengeId].add(questionIndex);
+          } else {
+            // This is a regular single-question challenge or overall completion
+            console.log(`✅ Found event-specific solved challenge: ${challengeId}`);
+            eventSolvedIds.add(challengeId);
+          }
         }
       });
+
+      // Check multi-question challenges to see if all questions are solved
+      for (const [challengeId, solvedQuestions] of Object.entries(challengeQuestionCounts)) {
+        // Get the challenge to know how many questions it has
+        const challengeRef = doc(db, "challenges", challengeId);
+        const challengeDoc = await getDoc(challengeRef);
+        
+        if (challengeDoc.exists()) {
+          const challengeData = challengeDoc.data();
+          const totalQuestions = challengeData.questions?.length || 0;
+          
+          if (totalQuestions > 0 && solvedQuestions.size >= totalQuestions) {
+            console.log(`✅ Fully solved multi-question challenge: ${challengeId} (${solvedQuestions.size}/${totalQuestions} questions)`);
+            eventSolvedIds.add(challengeId);
+          } else {
+            console.log(`🟡 Partially solved multi-question challenge: ${challengeId} (${solvedQuestions.size}/${totalQuestions} questions)`);
+          }
+        }
+      }
 
       console.log("✅ User has event-specific solved challenges:", Array.from(eventSolvedIds));
       setEventSolvedChallenges(eventSolvedIds);
@@ -420,7 +455,9 @@ const LiveEventDetails = () => {
               isActive: data.isActive,
               eventId: data.eventId,
               challengeType: data.challengeType,
-              flag: data.flag
+              flag: data.flag,
+              hasMultipleQuestions: data.hasMultipleQuestions || false,
+              questions: data.questions || []
             });
           });
           console.log("📡 Real-time challenges update:", challengesData.length);
@@ -443,134 +480,134 @@ const LiveEventDetails = () => {
     try {
       console.log("🏆 Fetching leaderboard for event:", eventId);
       
-      let leaderboardData: UserScore[] = [];
-
-      try {
-        console.log("🔄 Building leaderboard from EVENT submissions only");
+      // Get ALL event-specific submissions
+      const eventSubmissionsQuery = query(
+        collection(db, "submissions"),
+        where("eventId", "==", eventId),
+        where("isCorrect", "==", true)
+      );
+      
+      const eventSubmissionsSnapshot = await getDocs(eventSubmissionsQuery);
+      console.log("📊 Total correct submissions in event:", eventSubmissionsSnapshot.size);
+      
+      // Group submissions by user
+      const userScoresMap: { [key: string]: UserScore } = {};
+      const userChallengeMap: { [key: string]: Map<string, { points: number, questionIndices: Set<number> }> } = {};
+      
+      eventSubmissionsSnapshot.forEach(doc => {
+        const submission = doc.data();
+        const userId = submission.userId;
+        const challengeId = submission.challengeId;
+        const questionIndex = submission.questionIndex;
+        const isOverallFlag = submission.isOverallFlag;
         
-        // First, get the event to check participants
-        const eventDoc = await getDoc(doc(db, "events", eventId));
-        if (!eventDoc.exists()) {
-          console.log("❌ Event not found");
-          setLeaderboard([]);
-          return;
+        if (!userId) return;
+        
+        // Initialize user data if not exists
+        if (!userScoresMap[userId]) {
+          userScoresMap[userId] = {
+            userId: userId,
+            username: "Loading...",
+            score: 0,
+            solvedChallenges: 0,
+            rank: 0
+          };
+          userChallengeMap[userId] = new Map();
         }
         
-        const eventData = eventDoc.data();
-        const participants = eventData.participants || eventData.registeredUsers || [];
-        console.log("👥 Event participants:", participants);
-        
-        if (participants.length === 0) {
-          console.log("ℹ️ No participants found for this event");
-          setLeaderboard([]);
-          return;
+        if (!userChallengeMap[userId].has(challengeId)) {
+          userChallengeMap[userId].set(challengeId, { 
+            points: 0, 
+            questionIndices: new Set<number>() 
+          });
         }
-
-        // Get ALL challenges that belong to this event
-        const challengesQuery = query(
-          collection(db, "challenges"),
-          where("eventId", "==", eventId)
-        );
-        const challengesSnapshot = await getDocs(challengesQuery);
-        const eventChallengeIds = new Set<string>();
-        const challengePoints: { [key: string]: number } = {};
         
-        challengesSnapshot.forEach(doc => {
-          const data = doc.data();
-          eventChallengeIds.add(doc.id);
-          challengePoints[doc.id] = data.points || 0;
+        const challengeData = userChallengeMap[userId].get(challengeId)!;
+        const points = submission.pointsAwarded || submission.points || 0;
+        
+        // For multi-question challenges
+        if (questionIndex !== undefined && questionIndex !== null) {
+          // Only add points if this question hasn't been counted before
+          if (!challengeData.questionIndices.has(questionIndex)) {
+            challengeData.points += points;
+            challengeData.questionIndices.add(questionIndex);
+            console.log(`✅ ${userId} solved question ${questionIndex} of ${challengeId}: +${points}pts`);
+          }
+        } 
+        // For overall flag submission (multi-question completion bonus or regular challenge)
+        else if (isOverallFlag === true) {
+          // This is the overall completion for multi-question challenge
+          challengeData.points = points; // Use the overall points
+          console.log(`🏆 ${userId} completed multi-question challenge ${challengeId}: +${points}pts`);
+        }
+        // For regular single-question challenges
+        else {
+          challengeData.points = points; // Just set the points
+          console.log(`✅ ${userId} solved single challenge ${challengeId}: +${points}pts`);
+        }
+      });
+      
+      // Calculate total scores
+      Object.keys(userScoresMap).forEach(userId => {
+        let totalScore = 0;
+        let solvedCount = 0;
+        
+        userChallengeMap[userId].forEach((challengeData, challengeId) => {
+          totalScore += challengeData.points;
+          solvedCount += 1; // Count each challenge as solved if it has any points
         });
         
-        console.log("🎯 Challenges in event:", Array.from(eventChallengeIds));
-
-        // Get EVENT-SPECIFIC correct submissions by participants
-        const userScores: { [key: string]: UserScore } = {};
-        const userChallengeMap: { [key: string]: Set<string> } = {};
-
-        // For each participant, get their EVENT submissions for event challenges
-        for (const participantId of participants) {
-          console.log(`🔍 Processing participant: ${participantId}`);
-          
-          // Get EVENT-SPECIFIC correct submissions by this participant
-          const userSubmissionsQuery = query(
-            collection(db, "submissions"),
-            where("userId", "==", participantId),
-            where("eventId", "==", eventId),
-            where("isCorrect", "==", true)
-          );
-          
-          const userSubmissionsSnapshot = await getDocs(userSubmissionsQuery);
-          let userScore = 0;
-          let solvedCount = 0;
-
-          if (!userChallengeMap[participantId]) {
-            userChallengeMap[participantId] = new Set();
+        userScoresMap[userId].score = totalScore;
+        userScoresMap[userId].solvedChallenges = solvedCount;
+      });
+      
+      // Fetch usernames for all users
+      const userIds = Object.keys(userScoresMap);
+      console.log("👥 Users with submissions:", userIds);
+      
+      for (const userId of userIds) {
+        try {
+          const userDoc = await getDoc(doc(db, "users", userId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            userScoresMap[userId].username = 
+              userData.username || 
+              userData.displayName || 
+              userData.email?.split('@')[0] || 
+              "User";
           }
-
-          userSubmissionsSnapshot.forEach(doc => {
-            const submission = doc.data();
-            const challengeId = submission.challengeId;
-            
-            // Check if this submission is for a challenge in our event
-            if (challengeId && eventChallengeIds.has(challengeId)) {
-              // Only count each challenge once per user
-              if (!userChallengeMap[participantId].has(challengeId)) {
-                const points = submission.pointsAwarded || submission.points || challengePoints[challengeId] || 0;
-                userScore += points;
-                solvedCount += 1;
-                userChallengeMap[participantId].add(challengeId);
-                console.log(`✅ ${participantId} solved ${challengeId} in event: ${points}pts`);
-              }
-            }
-          });
-
-          // Get username
-          let username = "User";
-          try {
-            const userDoc = await getDoc(doc(db, "users", participantId));
-            if (userDoc.exists()) {
-              const userData = userDoc.data();
-              username = userData.username || userData.displayName || userData.email?.split('@')[0] || "User";
-            }
-          } catch (userError) {
-            console.log("❌ Could not fetch user data for participant:", participantId);
-          }
-
-          userScores[participantId] = {
-            userId: participantId,
-            username: username,
-            score: userScore,
-            solvedChallenges: solvedCount,
-            rank: 0 // Will be calculated after sorting
-          };
-
-          console.log(`📊 Final event score for ${username}: ${userScore}pts, ${solvedCount} challenges`);
+        } catch (userError) {
+          console.log("❌ Could not fetch user data for:", userId);
+          userScoresMap[userId].username = "User";
         }
-
-        // Sort by score and assign ranks
-        leaderboardData = Object.values(userScores)
-          .sort((a, b) => b.score - a.score)
-          .map((user, index) => ({
-            ...user,
-            rank: index + 1
-          }));
-
-        console.log("🏅 Final event leaderboard:", leaderboardData);
-        
-      } catch (submissionsError) {
-        console.log("❌ Leaderboard calculation failed:", submissionsError);
       }
-
+      
+      // Convert to array, sort, and assign ranks
+      let leaderboardData = Object.values(userScoresMap)
+        .sort((a, b) => b.score - a.score || a.username.localeCompare(b.username))
+        .map((user, index) => ({
+          ...user,
+          rank: index + 1
+        }));
+      
+      console.log("🏅 Final event leaderboard:", leaderboardData);
       setLeaderboard(leaderboardData);
+      
     } catch (error) {
       console.error("❌ Error fetching leaderboard:", error);
       setLeaderboard([]);
     }
   };
 
-  // NEW FUNCTION: Create event-specific submission for already solved challenges
+  // Create event-specific submission for already solved challenges
   const solveForEvent = async (challenge: Challenge) => {
     if (!user || !eventId || !challenge.flag) return;
+
+    // For multi-question challenges, navigate to the challenge page instead
+    if (challenge.hasMultipleQuestions) {
+      navigateToChallenge(challenge);
+      return;
+    }
 
     setProcessingSolve(challenge.id);
     setMessage(null);
@@ -660,61 +697,64 @@ const LiveEventDetails = () => {
     }
   };
 
-  const registerForEvent = async () => {
-    if (!user || !event) {
-      alert("Please log in to register for events");
-      navigate('/login');
-      return;
-    }
-
-    setRegistering(true);
-    setMessage(null);
-
-    try {
-      const alreadyRegistered = 
-        event.participants?.includes(user.uid) || 
-        event.registeredUsers?.includes(user.uid);
-      
-      if (alreadyRegistered) {
-        setMessage({ type: 'error', text: 'You are already registered for this event.' });
-        setIsRegistered(true);
-        return;
-      }
-
-      const eventRef = doc(db, "events", event.id);
-      await updateDoc(eventRef, {
-        participants: arrayUnion(user.uid),
-        totalParticipants: increment(1)
-      });
-
-      setIsRegistered(true);
-      setMessage({ type: 'success', text: 'Successfully registered for the event!' });
-      
-    } catch (error: any) {
-      console.error("❌ Error registering for event:", error);
-      setMessage({ 
-        type: 'error', 
-        text: `Failed to register: ${error.message}. Please try again.` 
-      });
-    } finally {
-      setRegistering(false);
-    }
-  };
-
   const navigateToEvents = () => {
     navigate("/live");
   };
 
-  // FIXED: Updated navigation to use new route
+  // Handle navigation based on challenge type (single vs multi-question)
   const handleChallengeClick = (challenge: Challenge) => {
-    if (isEventOwner || isRegistered) {
-      // Navigate to the new live event challenge detail route
-      navigate(`/live-event/${eventId}/challenge/${challenge.id}`);
-    } else {
+    if (!user) {
       setMessage({ 
         type: 'error', 
-        text: 'You need to register for this event to access challenges.' 
+        text: 'Please log in to access challenges.' 
       });
+      return;
+    }
+    
+    // Event owners can always access challenges without registration
+    if (isEventOwner) {
+      navigateToChallenge(challenge);
+      return;
+    }
+    
+    // Check if user is registered (for non-event owners)
+    if (!isRegistered) {
+      setMessage({ 
+        type: 'error', 
+        text: 'You need to be registered for this event to access challenges. Please register during the upcoming event phase.' 
+      });
+      return;
+    }
+    
+    // For multi-question challenges, always allow access (even if partially solved)
+    if (challenge.hasMultipleQuestions) {
+      navigateToChallenge(challenge);
+      return;
+    }
+    
+    // For single-question challenges, check if already solved
+    const isSolvedInEvent = isChallengeSolvedInEvent(challenge.id);
+    if (isSolvedInEvent) {
+      setMessage({ 
+        type: 'error', 
+        text: 'You have already solved this challenge in the event.' 
+      });
+      return;
+    }
+    
+    // Registered non-owners can access challenges
+    navigateToChallenge(challenge);
+  };
+
+  // Handle navigation to appropriate challenge type
+  const navigateToChallenge = (challenge: Challenge) => {
+    // Check if it's a multi-question challenge
+    if (challenge.hasMultipleQuestions) {
+      // Route to multi-question live event component
+      navigate(`/live-event/${eventId}/multi/${challenge.id}`);
+    } else {
+      // Route to single question live event component
+      navigate(`/live-event/${eventId}/challenge/${challenge.id}`);
     }
   };
 
@@ -765,14 +805,18 @@ const LiveEventDetails = () => {
 
   const getChallengeAccessStatus = (challenge: Challenge) => {
     if (isEventOwner) {
-      return { accessible: true, message: "Admin/Event Owner Access" };
+      return { accessible: true, message: "Event Owner Access" };
     }
     
-    if (isRegistered) {
+    if (isRegistered && user) {
       return { accessible: true, message: "Access Granted" };
     }
     
-    return { accessible: false, message: "Register to access challenges" };
+    if (!user) {
+      return { accessible: false, message: "Login Required" };
+    }
+    
+    return { accessible: false, message: "Event Registration Required" };
   };
 
   const isChallengeSolved = (challengeId: string) => {
@@ -780,7 +824,17 @@ const LiveEventDetails = () => {
   };
 
   const isChallengeSolvedInEvent = (challengeId: string) => {
-    return eventSolvedChallenges.has(challengeId);
+    // Check if the challenge is in the solved set
+    const isInSet = eventSolvedChallenges.has(challengeId);
+    
+    // Also check if it's a multi-question challenge that might be fully solved
+    const challenge = challenges.find(c => c.id === challengeId);
+    if (challenge?.hasMultipleQuestions && isInSet) {
+      // For multi-question challenges, we need to check if ALL questions are solved
+      return true; // The set will only contain fully solved multi-question challenges
+    }
+    
+    return isInSet;
   };
 
   const renderCountdown = () => {
@@ -1078,45 +1132,8 @@ const LiveEventDetails = () => {
             </Card>
           )}
 
-          {/* Action Buttons - Only show register button if user is NOT registered */}
-          {!isRegistered && (
-            <div className="flex flex-col sm:flex-row gap-2 mb-6">
-              {/* Manage Button for Owners/Admins */}
-              {isEventOwner && (
-                <Button 
-                  onClick={manageEvent}
-                  variant="outline"
-                  className="flex-1 sm:flex-none"
-                >
-                  <Settings className="w-4 h-4 mr-2" />
-                  Manage Event
-                </Button>
-              )}
-              
-              {/* Register Button for non-registered users */}
-              <Button 
-                onClick={registerForEvent} 
-                disabled={registering}
-                className="flex-1"
-                variant="terminal"
-              >
-                {registering ? (
-                  <>
-                    <div className="animate-spin w-4 h-4 border border-white border-t-transparent rounded-full mr-2"></div>
-                    Registering...
-                  </>
-                ) : (
-                  <>
-                    <UserPlus className="w-4 h-4 mr-2" />
-                    Register to Join
-                  </>
-                )}
-              </Button>
-            </div>
-          )}
-
-          {/* For registered users, only show Manage Event button if they are event owner */}
-          {isRegistered && isEventOwner && (
+          {/* Action Buttons - Only show Manage Event for owners */}
+          {(isEventOwner) && (
             <div className="flex flex-col sm:flex-row gap-2 mb-6">
               <Button 
                 onClick={manageEvent}
@@ -1144,29 +1161,6 @@ const LiveEventDetails = () => {
             </Alert>
           )}
 
-          {/* Debug Info */}
-          {isEventOwner && (
-            <Card className="mb-4 border border-orange-200 bg-orange-50">
-              <CardContent className="p-3">
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-orange-600" />
-                    <span className="text-orange-800 font-medium">Debug Information</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>Challenges: {challenges.length}</div>
-                    <div>Leaderboard: {leaderboard.length} players</div>
-                    <div>Event ID: {eventId}</div>
-                    <div>Solved: {solvedChallenges.size} challenges</div>
-                    <div>Event Solved: {eventSolvedChallenges.size} challenges</div>
-                    <div>Participants: {participantCount}</div>
-                    <div>Registered: {isRegistered ? 'Yes' : 'No'}</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
           {/* Main Content Grid */}
           <div className="flex flex-col lg:grid lg:grid-cols-3 gap-4">
             {/* Challenges Section */}
@@ -1177,8 +1171,9 @@ const LiveEventDetails = () => {
                     <Shield className="w-4 h-4" />
                     Live Challenges ({challenges.length})
                     <Badge variant="outline" className="text-xs">
-                      {isEventOwner ? "Full Access" : 
-                       isRegistered ? "Access Granted" : "Register to Access"}
+                      {isEventOwner ? "Event Owner Access" : 
+                       isRegistered ? "Access Granted" : 
+                       user ? "Event Registration Required" : "Login Required"}
                     </Badge>
                   </CardTitle>
                   {!challengesLoaded && (
@@ -1215,32 +1210,58 @@ const LiveEventDetails = () => {
                         const access = getChallengeAccessStatus(challenge);
                         const isSolved = isChallengeSolved(challenge.id);
                         const isSolvedInEvent = isChallengeSolvedInEvent(challenge.id);
+                        const isMultiQuestion = challenge.hasMultipleQuestions;
+                        const isFullySolved = isSolvedInEvent;
                         
                         return (
                           <Card 
                             key={challenge.id} 
                             className={`border-border ${
-                              isSolvedInEvent ? 'border-green-200 bg-green-50' : 
-                              isSolved ? 'border-blue-200 bg-blue-50' : 
-                              access.accessible ? 'cursor-pointer' : 'opacity-70'
+                              isFullySolved ? 'border-green-200 cursor-default' : 
+                              isSolved && !isSolvedInEvent ? 'border-blue-200' : 
+                              access.accessible ? 'cursor-pointer hover:border-primary/30' : 'opacity-70'
                             }`}
-                            onClick={() => access.accessible && !isSolvedInEvent && !isSolved && handleChallengeClick(challenge)}
+                            onClick={() => {
+                              // Don't allow clicking if challenge is fully solved in event
+                              if (isFullySolved) {
+                                setMessage({ 
+                                  type: 'error', 
+                                  text: 'You have already completed this challenge in the event.' 
+                                });
+                                return;
+                              }
+                              
+                              if (access.accessible) {
+                                handleChallengeClick(challenge);
+                              }
+                            }}
                           >
                             <CardContent className="p-3">
                               <div className="flex justify-between items-start mb-2">
                                 <div className="flex items-center gap-2">
                                   <h3 className="font-semibold text-sm">{challenge.title}</h3>
                                   {!access.accessible && <Lock className="w-3 h-3 text-muted-foreground" />}
-                                  {isSolvedInEvent && (
+                                  {isFullySolved && (
                                     <Badge className="bg-green-500/20 text-green-600 border-green-200 text-xs">
                                       <CheckCircle className="w-3 h-3 mr-1" />
-                                      Solved in Event
+                                      {isMultiQuestion ? 'All Questions Solved' : 'Solved in Event'}
                                     </Badge>
                                   )}
-                                  {isSolved && !isSolvedInEvent && (
+                                  {isSolved && !isFullySolved && !isMultiQuestion && (
                                     <Badge className="bg-blue-500/20 text-blue-600 border-blue-200 text-xs">
                                       <CheckCircle className="w-3 h-3 mr-1" />
                                       Solved in Practice
+                                    </Badge>
+                                  )}
+                                  {isSolved && !isFullySolved && isMultiQuestion && (
+                                    <Badge className="bg-blue-500/20 text-blue-600 border-blue-200 text-xs">
+                                      <CheckCircle className="w-3 h-3 mr-1" />
+                                      Partially Solved (Practice)
+                                    </Badge>
+                                  )}
+                                  {isMultiQuestion && !isFullySolved && (
+                                    <Badge className="bg-purple-500/20 text-purple-600 border-purple-200 text-xs">
+                                      Multi-Question
                                     </Badge>
                                   )}
                                 </div>
@@ -1267,16 +1288,18 @@ const LiveEventDetails = () => {
                               </p>
                               <div className="flex justify-between items-center mt-2">
                                 <p className={`text-xs ${
-                                  isSolvedInEvent ? 'text-green-600' : 
+                                  isFullySolved ? 'text-green-600' : 
                                   isSolved ? 'text-blue-600' : 
                                   access.accessible ? 'text-primary' : 'text-orange-600'
                                 }`}>
-                                  {isSolvedInEvent ? 'Challenge completed' : 
-                                   isSolved ? 'Mark for event to earn points' : 
+                                  {isFullySolved ? 
+                                    'Challenge completed' : 
+                                   isSolved ? 
+                                    (isMultiQuestion ? 'Continue in event to earn points' : 'Mark for event to earn points') : 
                                    access.message}
                                 </p>
                                 <div className="flex gap-1">
-                                  {isSolved && !isSolvedInEvent && (
+                                  {isSolved && !isFullySolved && (
                                     <Button 
                                       variant="outline" 
                                       size="sm" 
@@ -1292,13 +1315,13 @@ const LiveEventDetails = () => {
                                       ) : (
                                         <RotateCcw className="w-3 h-3 mr-1" />
                                       )}
-                                      Mark for Event
+                                      {isMultiQuestion ? 'Continue in Event' : 'Mark for Event'}
                                     </Button>
                                   )}
-                                  {access.accessible && !isSolvedInEvent && !isSolved && (
+                                  {access.accessible && !isFullySolved && (
                                     <Button variant="ghost" size="sm" className="h-6 px-2 text-xs">
                                       <Eye className="w-3 h-3 mr-1" />
-                                      Solve
+                                      {isMultiQuestion ? 'View Questions' : 'Solve'}
                                     </Button>
                                   )}
                                 </div>

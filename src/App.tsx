@@ -20,8 +20,9 @@ import GlobalLeaderboard from './components/GlobalLeaderboard';
 import LiveLeaderboard from './components/LiveLeaderboard';
 import AdminDashboard from './components/AdminDashboard';
 import PracticeChallengeDetail from './components/PracticeChallengeDetail';
-// IMPORT THE MULTI-QUESTION COMPONENT
+// IMPORT THE MULTI-QUESTION COMPONENTS
 import MultiQuestionPracticeChallengeDetails from './components/admin/practice/MultiQuestionPracticeChallengeDetails';
+import MultiLiveEventChallengeDetails from './components/live/MultiLiveEventChallengeDetails'; // ADD THIS IMPORT
 import LiveEventChallengeDetail from './components/LiveEventChallengeDetail';
 import UpcomingChallengePreview from './components/UpcomingChallengePreview';
 import UpcomingEventDetails from './components/UpcomingEventDetails';
@@ -161,12 +162,23 @@ function App() {
                     } 
                   />
                   
-                  {/* Live Event Challenge Detail Route - Accessible to ALL authenticated users (including admins) */}
+                  {/* Live Event Challenge Detail Routes - Accessible to ALL authenticated users (including admins) */}
+                  {/* SINGLE QUESTION LIVE EVENT CHALLENGES */}
                   <Route 
                     path="/live-event/:eventId/challenge/:challengeId" 
                     element={
                       <ProtectedRoute>
                         <LiveEventChallengeDetail />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  
+                  {/* MULTI-QUESTION LIVE EVENT CHALLENGES - ADD THIS NEW ROUTE */}
+                  <Route 
+                    path="/live-event/:eventId/multi/:challengeId" 
+                    element={
+                      <ProtectedRoute>
+                        <MultiLiveEventChallengeDetails />
                       </ProtectedRoute>
                     } 
                   />
