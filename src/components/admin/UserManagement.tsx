@@ -5,7 +5,11 @@ import {
   getDocs, 
   updateDoc, 
   doc, 
-  deleteDoc 
+  deleteDoc,
+  getDoc,
+  query,
+  where,
+  writeBatch
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import { Button } from "@/components/ui/button";
@@ -26,7 +30,8 @@ import {
   Play,
   Pause,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Database
 } from "lucide-react";
 import {
   AlertDialog,
@@ -58,6 +63,8 @@ interface User {
   institution?: string;
   bio?: string;
   challengesSolved?: number;
+  uid?: string;
+  username?: string;
 }
 
 const UserManagement = ({ onBack }: UserManagementProps) => {
@@ -70,6 +77,7 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -127,7 +135,8 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
         user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         user.role?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         user.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.lastName?.toLowerCase().includes(searchTerm.toLowerCase())
+        user.lastName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.username?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
@@ -222,28 +231,122 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
     }
   };
 
-  // New function to delete user account
+  // Enhanced function to delete user account with related data cleanup
   const deleteUserAccount = async () => {
     if (!userToDelete) return;
 
+    setIsDeleting(true);
+    
     try {
-      console.log("🗑️ Deleting user account:", userToDelete.id);
+      console.log("🗑️ Starting user deletion process:", {
+        userId: userToDelete.id,
+        email: userToDelete.email,
+        username: userToDelete.username
+      });
 
-      // Delete from Firestore
-      await deleteDoc(doc(db, "users", userToDelete.id));
+      const batch = writeBatch(db);
       
+      // 1. Delete the main user document from 'users' collection
+      const userDocRef = doc(db, "users", userToDelete.id);
+      
+      // Verify document exists before adding to batch
+      const userDoc = await getDoc(userDocRef);
+      if (!userDoc.exists()) {
+        throw new Error(`User document not found: ${userToDelete.id}`);
+      }
+      
+      batch.delete(userDocRef);
+      console.log("✅ Added user document to batch delete");
+
+      // 2. Delete from 'usernames' collection if exists
+      if (userToDelete.username) {
+        const usernameDocRef = doc(db, "usernames", userToDelete.username);
+        const usernameDoc = await getDoc(usernameDocRef);
+        if (usernameDoc.exists()) {
+          batch.delete(usernameDocRef);
+          console.log("✅ Added username document to batch delete");
+        }
+      }
+
+      // 3. Delete user's submissions
+      const submissionsQuery = query(collection(db, "submissions"), where("userId", "==", userToDelete.id));
+      const submissionsSnapshot = await getDocs(submissionsQuery);
+      submissionsSnapshot.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      console.log(`✅ Added ${submissionsSnapshot.size} submission(s) to batch delete`);
+
+      // 4. Clean up conversations
+      const conversationsQuery = query(collection(db, "conversations"), where("userId", "==", userToDelete.id));
+      const conversationsSnapshot = await getDocs(conversationsQuery);
+      conversationsSnapshot.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      console.log(`✅ Added ${conversationsSnapshot.size} conversation(s) to batch delete`);
+
+      // 5. Clean up messages sent by user
+      const messagesQuery = query(collection(db, "messages"), where("senderId", "==", userToDelete.id));
+      const messagesSnapshot = await getDocs(messagesQuery);
+      messagesSnapshot.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      console.log(`✅ Added ${messagesSnapshot.size} message(s) to batch delete`);
+
+      // 6. Clean up host requests
+      const hostRequestsQuery = query(collection(db, "hostRequests"), where("userId", "==", userToDelete.id));
+      const hostRequestsSnapshot = await getDocs(hostRequestsQuery);
+      hostRequestsSnapshot.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      console.log(`✅ Added ${hostRequestsSnapshot.size} host request(s) to batch delete`);
+
+      // 7. Execute the batch
+      console.log("🚀 Executing batch delete...");
+      await batch.commit();
+      console.log("✅ Batch delete completed successfully");
+
       // Update local state
       setUsers(users.filter(user => user.id !== userToDelete.id));
+      
+      setMessage({ 
+        type: 'success', 
+        text: `Account for ${userToDelete.displayName || userToDelete.email} has been permanently deleted` 
+      });
+      setTimeout(() => setMessage(null), 5000);
 
-      console.log("✅ User account deleted successfully");
-      setMessage({ type: 'success', text: `Account for ${userToDelete.displayName || userToDelete.email} has been deleted` });
-      setTimeout(() => setMessage(null), 3000);
     } catch (error: any) {
       console.error("❌ Error deleting user account:", error);
-      setMessage({ type: 'error', text: `Failed to delete account: ${error.message}` });
+      console.error("Error details:", {
+        code: error.code,
+        message: error.message,
+        stack: error.stack
+      });
+      
+      setMessage({ 
+        type: 'error', 
+        text: `Failed to delete account: ${error.message || 'Unknown error'}. Please check console for details.` 
+      });
     } finally {
+      setIsDeleting(false);
       setDeleteDialogOpen(false);
       setUserToDelete(null);
+    }
+  };
+
+  // Simple test function to verify deletion works
+  const testDirectDelete = async (testUserId: string) => {
+    try {
+      console.log("🧪 Testing direct deletion for:", testUserId);
+      const docRef = doc(db, "users", testUserId);
+      await deleteDoc(docRef);
+      console.log("✅ Direct deletion test successful");
+      setMessage({ type: 'success', text: 'Test deletion successful' });
+      
+      // Refresh user list
+      fetchUsers();
+    } catch (error: any) {
+      console.error("❌ Direct deletion test failed:", error.message);
+      setMessage({ type: 'error', text: `Test failed: ${error.message}` });
     }
   };
 
@@ -387,6 +490,29 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
         </Card>
       </div>
 
+      {/* Debug button for testing */}
+      <div className="flex justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            const testUser = users.find(u => u.role === "student");
+            if (testUser) {
+              console.log("🧪 Test user selected:", testUser);
+              if (confirm(`Test deletion for ${testUser.email}?`)) {
+                testDirectDelete(testUser.id);
+              }
+            } else {
+              setMessage({ type: 'error', text: 'No test user found' });
+            }
+          }}
+          className="text-xs"
+        >
+          <Database className="w-3 h-3 mr-1" />
+          Test Deletion
+        </Button>
+      </div>
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="all" className="text-xs">All Users</TabsTrigger>
@@ -443,9 +569,14 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
                           {user.role === "admin" && <Crown className="w-4 h-4 text-yellow-600" />}
                         </div>
                         <p className="text-sm text-muted-foreground truncate">{user.email}</p>
-                        {user.institution && (
-                          <p className="text-xs text-muted-foreground truncate">{user.institution}</p>
-                        )}
+                        <div className="flex gap-2 mt-1">
+                          {user.username && (
+                            <Badge variant="outline" className="text-xs">@{user.username}</Badge>
+                          )}
+                          <Badge variant="outline" className="text-xs">
+                            ID: {user.id.substring(0, 8)}...
+                          </Badge>
+                        </div>
                         
                         {/* Host request reason */}
                         {user.requestedHostRole && user.hostRequestReason && (
@@ -574,6 +705,7 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
                     <div>
                       <p className="font-medium">{userToDelete.displayName || "No Name"}</p>
                       <p className="text-xs text-muted-foreground">{userToDelete.email}</p>
+                      <p className="text-xs text-muted-foreground">ID: {userToDelete.id}</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-sm">
@@ -589,6 +721,18 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
                         {getStatusText(userToDelete)}
                       </Badge>
                     </div>
+                    <div>
+                      <span className="text-muted-foreground">Username:</span>
+                      <span className="ml-2">{userToDelete.username || "None"}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Created:</span>
+                      <span className="ml-2">
+                        {userToDelete.createdAt?.toDate ? 
+                          new Date(userToDelete.createdAt.toDate()).toLocaleDateString() : 
+                          "Unknown"}
+                      </span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -596,24 +740,44 @@ const UserManagement = ({ onBack }: UserManagementProps) => {
               <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-3">
                 <p className="text-sm text-red-700 font-medium">⚠️ This action cannot be undone.</p>
                 <p className="text-xs text-red-600 mt-1">
-                  All user data will be permanently deleted from the database.
+                  The following data will be permanently deleted:
                 </p>
+                <ul className="text-xs text-red-600 mt-1 ml-4 list-disc">
+                  <li>User profile document</li>
+                  <li>Username record</li>
+                  <li>All submissions</li>
+                  <li>All conversations and messages</li>
+                  <li>All host requests</li>
+                </ul>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => {
-              setDeleteDialogOpen(false);
-              setUserToDelete(null);
-            }}>
+            <AlertDialogCancel 
+              onClick={() => {
+                setDeleteDialogOpen(false);
+                setUserToDelete(null);
+              }}
+              disabled={isDeleting}
+            >
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={deleteUserAccount}
               className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={isDeleting}
             >
-              <Trash2 className="w-4 h-4 mr-2" />
-              Delete Account
+              {isDeleting ? (
+                <>
+                  <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete Account
+                </>
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
