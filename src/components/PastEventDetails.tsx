@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Alert, AlertDescription } from "../components/ui/alert";
-import { Calendar, Users, Clock, MapPin, Trophy, Shield, ArrowLeft, CheckCircle, XCircle, Crown, Eye, BookOpen, BarChart3, Award, Target } from "lucide-react";
+import { Calendar, Users, Clock, MapPin, Trophy, Shield, ArrowLeft, CheckCircle, XCircle, Crown, Eye, BookOpen, Award, Target, Zap, Lock, Medal, BarChart } from "lucide-react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 
@@ -51,6 +51,9 @@ interface Challenge {
   challengeType?: 'practice' | 'live' | 'past_event' | 'upcoming';
   finalCategory?: string;
   solveCount?: number;
+  flag?: string;
+  hasMultipleQuestions?: boolean;
+  questions?: any[];
 }
 
 interface UserStats {
@@ -58,7 +61,7 @@ interface UserStats {
   username: string;
   totalPoints: number;
   challengesSolved: number;
-  rank?: number;
+  rank: number;
 }
 
 const PastEventDetails = () => {
@@ -106,6 +109,7 @@ const PastEventDetails = () => {
           id: eventDoc.id,
           ...eventDoc.data()
         } as Event;
+        console.log("📊 Event data loaded:", eventData);
         setEvent(eventData);
         
         if (user) {
@@ -133,31 +137,58 @@ const PastEventDetails = () => {
     if (!eventId) return;
 
     try {
-      const challengesQuery = query(
-        collection(db, "challenges"),
-        where("eventId", "==", eventId),
-        orderBy("points", "asc")
-      );
-      const challengesSnapshot = await getDocs(challengesQuery);
+      console.log("🔍 Fetching challenges for event:", eventId);
+      
+      // First, try to get ALL challenges and filter locally
+      const challengesRef = collection(db, "challenges");
+      const challengesSnapshot = await getDocs(challengesRef);
+      
+      console.log("📊 Total challenges in database:", challengesSnapshot.size);
       
       const challengesData: Challenge[] = [];
+      let foundCount = 0;
+      
       challengesSnapshot.forEach(doc => {
         const data = doc.data();
-        challengesData.push({
-          id: doc.id,
-          title: data.title,
-          description: data.description,
-          category: data.finalCategory || data.category,
-          points: data.points,
-          difficulty: data.difficulty,
-          solvedBy: data.solvedBy || [],
-          isActive: data.isActive,
-          eventId: data.eventId,
-          challengeType: data.challengeType,
-          solveCount: data.solvedBy?.length || 0
-        });
+        // Check multiple possible fields for event association
+        const hasEventId = data.eventId === eventId;
+        const hasEventRef = data.eventRef === eventId;
+        const hasEventInData = data.event === eventId;
+        
+        if (hasEventId || hasEventRef || hasEventInData) {
+          foundCount++;
+          console.log(`✅ Found challenge for event ${eventId}:`, {
+            id: doc.id,
+            title: data.title,
+            eventId: data.eventId,
+            eventRef: data.eventRef,
+            event: data.event
+          });
+          
+          challengesData.push({
+            id: doc.id,
+            title: data.title || "Untitled Challenge",
+            description: data.description || "No description available",
+            category: data.finalCategory || data.category || "misc",
+            points: data.points || 0,
+            difficulty: data.difficulty || "Easy",
+            solvedBy: data.solvedBy || [],
+            isActive: data.isActive || false,
+            eventId: data.eventId,
+            challengeType: data.challengeType,
+            solveCount: data.solvedBy?.length || 0,
+            flag: data.flag,
+            hasMultipleQuestions: data.hasMultipleQuestions || false,
+            questions: data.questions || []
+          });
+        }
       });
 
+      console.log(`✅ Total challenges found for event ${eventId}: ${foundCount}`);
+      
+      // Sort by points
+      challengesData.sort((a, b) => (a.points || 0) - (b.points || 0));
+      
       setChallenges(challengesData);
       setChallengesLoaded(true);
 
@@ -172,55 +203,123 @@ const PastEventDetails = () => {
     if (!eventId) return;
 
     try {
-      // Get all participants
-      const eventRef = doc(db, "events", eventId);
-      const eventDoc = await getDoc(eventRef);
+      console.log("📊 Fetching event stats for:", eventId);
       
-      if (!eventDoc.exists()) {
+      // Get ALL submissions for this event
+      const submissionsRef = collection(db, "submissions");
+      const submissionsSnapshot = await getDocs(submissionsRef);
+      
+      console.log("📊 Total submissions in database:", submissionsSnapshot.size);
+      
+      // Filter submissions for this event locally
+      const eventSubmissions: any[] = [];
+      submissionsSnapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.eventId === eventId && data.isCorrect === true) {
+          eventSubmissions.push(data);
+        }
+      });
+      
+      console.log("📊 Event submissions found:", eventSubmissions.length);
+      
+      if (eventSubmissions.length === 0) {
+        console.log("ℹ️ No submissions found for this event");
+        setUserStats([]);
         setStatsLoaded(true);
         return;
       }
-
-      const eventData = eventDoc.data();
-      const participants = eventData.participants || eventData.registeredUsers || [];
       
-      // Calculate stats for each participant
-      const statsPromises = participants.map(async (userId: string) => {
-        // Get user data
-        const userRef = doc(db, "users", userId);
-        const userDoc = await getDoc(userRef);
-        const username = userDoc.exists() ? userDoc.data().username || `User${userId.slice(-6)}` : `User${userId.slice(-6)}`;
+      // Get challenges for point values
+      const challengesRef = collection(db, "challenges");
+      const challengesSnapshot = await getDocs(challengesRef);
+      
+      // Create a map of challenge points
+      const challengePointsMap: { [key: string]: number } = {};
+      challengesSnapshot.forEach(doc => {
+        const data = doc.data();
+        challengePointsMap[doc.id] = data.points || 0;
+      });
+      
+      console.log("📊 Challenge points map size:", Object.keys(challengePointsMap).length);
+      
+      // Group submissions by user and challenge
+      const userStatsMap: { [key: string]: UserStats } = {};
+      const userChallengeMap: { [key: string]: Set<string> } = {};
+      
+      eventSubmissions.forEach(submission => {
+        const userId = submission.userId;
+        const challengeId = submission.challengeId;
+        const userName = submission.userName || submission.username;
         
-        // Calculate points and solved challenges for this event
-        let totalPoints = 0;
-        let challengesSolved = 0;
-        
-        for (const challenge of challenges) {
-          if (challenge.solvedBy?.includes(userId)) {
-            totalPoints += challenge.points;
-            challengesSolved++;
-          }
+        if (!userId || !challengeId) {
+          return;
         }
         
-        return {
-          userId,
-          username,
-          totalPoints,
-          challengesSolved
-        };
+        // Initialize user stats if not exists
+        if (!userStatsMap[userId]) {
+          userStatsMap[userId] = {
+            userId: userId,
+            username: userName || `User${userId.slice(-4)}`,
+            totalPoints: 0,
+            challengesSolved: 0,
+            rank: 0
+          };
+          userChallengeMap[userId] = new Set();
+        }
+        
+        // Only count each challenge once per user (avoid duplicates)
+        if (!userChallengeMap[userId].has(challengeId)) {
+          // Get points from challenge map, fallback to submission points
+          const points = challengePointsMap[challengeId] || submission.pointsAwarded || submission.points || 0;
+          userStatsMap[userId].totalPoints += points;
+          userStatsMap[userId].challengesSolved += 1;
+          userChallengeMap[userId].add(challengeId);
+        }
       });
-
-      const stats = await Promise.all(statsPromises);
       
-      // Sort by points (descending) and add ranks
-      const sortedStats = stats
-        .filter(stat => stat.totalPoints > 0)
-        .sort((a, b) => b.totalPoints - a.totalPoints)
+      // Fetch usernames for users who don't have them in submissions
+      const userIds = Object.keys(userStatsMap);
+      console.log("👥 Users with submissions:", userIds.length);
+      
+      for (const userId of userIds) {
+        // If we don't have a proper username, try to fetch from users collection
+        if (userStatsMap[userId].username.startsWith('User')) {
+          try {
+            const userDoc = await getDoc(doc(db, "users", userId));
+            if (userDoc.exists()) {
+              const userData = userDoc.data();
+              userStatsMap[userId].username = 
+                userData.username || 
+                userData.displayName || 
+                userData.email?.split('@')[0] || 
+                `User${userId.slice(-4)}`;
+            }
+          } catch (error) {
+            console.log("❌ Could not fetch user data for:", userId);
+          }
+        }
+      }
+      
+      // Convert to array, sort by points (descending), and assign ranks
+      const sortedStats = Object.values(userStatsMap)
+        .sort((a, b) => {
+          // First sort by points
+          if (b.totalPoints !== a.totalPoints) {
+            return b.totalPoints - a.totalPoints;
+          }
+          // If points are equal, sort by challenges solved
+          if (b.challengesSolved !== a.challengesSolved) {
+            return b.challengesSolved - a.challengesSolved;
+          }
+          // Finally sort by username
+          return a.username.localeCompare(b.username);
+        })
         .map((stat, index) => ({
           ...stat,
           rank: index + 1
         }));
       
+      console.log("🏅 Final event stats:", sortedStats);
       setUserStats(sortedStats);
       setStatsLoaded(true);
 
@@ -249,16 +348,23 @@ const PastEventDetails = () => {
     }
   };
 
+  const formatDateShort = (dateString: string): string => {
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return "Invalid date";
+      }
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric'
+      });
+    } catch {
+      return "Invalid date";
+    }
+  };
+
   const navigateToEvents = () => {
     navigate("/live");
-  };
-
-  const handleChallengeClick = (challenge: Challenge) => {
-    navigate(`/challenge/${challenge.id}`);
-  };
-
-  const manageEvent = () => {
-    navigate(`/admin?tab=events&event=${event?.id}`);
   };
 
   const getDifficultyColor = (difficulty: string) => {
@@ -278,7 +384,9 @@ const PastEventDetails = () => {
       forensics: "bg-orange-500/20 text-orange-600 border-orange-200",
       pwn: "bg-red-500/20 text-red-600 border-red-200",
       reversing: "bg-indigo-500/20 text-indigo-600 border-indigo-200",
-      misc: "bg-gray-500/20 text-gray-600 border-gray-200"
+      misc: "bg-gray-500/20 text-gray-600 border-gray-200",
+      networking: "bg-teal-500/20 text-teal-600 border-teal-200",
+      osint: "bg-pink-500/20 text-pink-600 border-pink-200"
     };
     return colors[category.toLowerCase()] || "bg-gray-500/20 text-gray-600 border-gray-200";
   };
@@ -350,6 +458,7 @@ const PastEventDetails = () => {
   const participantCount = getParticipantCount(event);
   const userRank = getUserRank();
   const currentUserStats = getUserStats();
+  const totalPoints = userStats.reduce((sum, stat) => sum + stat.totalPoints, 0);
 
   return (
     <>
@@ -462,6 +571,34 @@ const PastEventDetails = () => {
             </CardContent>
           </Card>
 
+          {/* Event Summary Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <Card className="border">
+              <CardContent className="p-4 text-center">
+                <div className="text-sm text-muted-foreground mb-1">Challenges</div>
+                <div className="text-lg font-bold">{challenges.length}</div>
+              </CardContent>
+            </Card>
+            <Card className="border">
+              <CardContent className="p-4 text-center">
+                <div className="text-sm text-muted-foreground mb-1">Participants</div>
+                <div className="text-lg font-bold">{participantCount}</div>
+              </CardContent>
+            </Card>
+            <Card className="border">
+              <CardContent className="p-4 text-center">
+                <div className="text-sm text-muted-foreground mb-1">Active Solvers</div>
+                <div className="text-lg font-bold">{userStats.length}</div>
+              </CardContent>
+            </Card>
+            <Card className="border">
+              <CardContent className="p-4 text-center">
+                <div className="text-sm text-muted-foreground mb-1">Total Points</div>
+                <div className="text-lg font-bold">{totalPoints}</div>
+              </CardContent>
+            </Card>
+          </div>
+
           {/* User Performance Summary */}
           {isRegistered && currentUserStats && (
             <Card className="mb-4 border border-blue-200 bg-blue-50">
@@ -490,31 +627,6 @@ const PastEventDetails = () => {
             </Card>
           )}
 
-          {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-2 mb-6">
-            {/* Manage Button for Owners/Admins */}
-            {isEventOwner && (
-              <Button 
-                onClick={manageEvent}
-                variant="outline"
-                className="flex-1 sm:flex-none"
-              >
-                <BarChart3 className="w-4 h-4 mr-2" />
-                View Analytics
-              </Button>
-            )}
-            
-            {/* View Leaderboard */}
-            <Button 
-              onClick={() => navigate(`/leaderboard?event=${event.id}`)}
-              variant="outline"
-              className="flex-1 sm:flex-none"
-            >
-              <BarChart3 className="w-4 h-4 mr-2" />
-              Full Leaderboard
-            </Button>
-          </div>
-
           {message && (
             <Alert className={`mb-4 ${message.type === 'success' ? 'bg-green-500/10 border-green-200' : 'bg-red-500/10 border-red-200'}`}>
               <div className="flex items-center gap-2">
@@ -530,16 +642,18 @@ const PastEventDetails = () => {
             </Alert>
           )}
 
-          {/* Challenges Section */}
-          <div className="flex flex-col lg:grid lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 space-y-4">
+          {/* Main Content Grid */}
+          <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6">
+            {/* Challenges Section */}
+            <div className="lg:col-span-2">
               <Card className="border">
                 <CardHeader className="p-4 pb-2">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Shield className="w-4 h-4" />
                     Event Challenges ({challenges.length})
                     <Badge variant="outline" className="text-xs">
-                      Available for Review
+                      <Lock className="w-3 h-3 mr-1" />
+                      View Only
                     </Badge>
                   </CardTitle>
                   {!challengesLoaded && (
@@ -552,33 +666,35 @@ const PastEventDetails = () => {
                   {challenges.length === 0 ? (
                     <div className="text-center py-4">
                       <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
-                      <p className="text-sm text-muted-foreground">No challenges available for this event.</p>
+                      <p className="text-sm text-muted-foreground mb-2">No challenges available for this event.</p>
+                      <p className="text-xs text-muted-foreground">
+                        Challenges might not be linked to this event or the event has no challenges.
+                      </p>
                     </div>
                   ) : (
                     <div className="space-y-3">
                       {challenges.map((challenge) => {
-                        const isSolved = user && challenge.solvedBy?.includes(user.uid);
                         const solveCount = challenge.solveCount || 0;
+                        const isMultiQuestion = challenge.hasMultipleQuestions;
                         
                         return (
                           <Card 
                             key={challenge.id} 
-                            className={`border-border transition-colors hover:border-primary/30 cursor-pointer ${
-                              isSolved ? 'border-green-200 bg-green-50' : ''
-                            }`}
-                            onClick={() => handleChallengeClick(challenge)}
+                            className="border-border"
                           >
                             <CardContent className="p-3">
                               <div className="flex justify-between items-start mb-2">
                                 <div className="flex items-center gap-2">
                                   <h3 className="font-semibold text-sm">{challenge.title}</h3>
-                                  {isSolved && <CheckCircle className="w-3 h-3 text-green-600" />}
+                                  {isMultiQuestion && (
+                                    <Badge className="bg-purple-500/20 text-purple-600 border-purple-200 text-xs">
+                                      Multi-Question
+                                    </Badge>
+                                  )}
                                 </div>
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="outline" className="font-mono text-xs">
-                                    {challenge.points} pts
-                                  </Badge>
-                                </div>
+                                <Badge variant="outline" className="font-mono text-xs">
+                                  {challenge.points} pts
+                                </Badge>
                               </div>
                               <div className="flex items-center gap-2 mb-2">
                                 <Badge 
@@ -593,21 +709,28 @@ const PastEventDetails = () => {
                                 >
                                   {challenge.category}
                                 </Badge>
-                                <Badge variant="outline" className="text-xs">
-                                  <Target className="w-3 h-3 mr-1" />
-                                  {solveCount} solves
-                                </Badge>
+                                {solveCount > 0 && (
+                                  <Badge variant="outline" className="text-xs">
+                                    <Target className="w-3 h-3 mr-1" />
+                                    {solveCount} solve{solveCount !== 1 ? 's' : ''}
+                                  </Badge>
+                                )}
                               </div>
-                              <p className="text-xs text-muted-foreground line-clamp-2">
+                              <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
                                 {challenge.description}
                               </p>
-                              <div className="flex justify-between items-center mt-2">
-                                <p className={`text-xs ${isSolved ? 'text-green-600' : 'text-gray-600'}`}>
-                                  {isSolved ? 'Solved' : 'Available for review'}
+                              <div className="flex justify-between items-center">
+                                <p className="text-xs text-gray-600">
+                                  Past event challenge - view only
                                 </p>
-                                <Button variant="ghost" size="sm" className="h-6 px-2 text-xs">
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-6 px-2 text-xs opacity-50 cursor-not-allowed"
+                                  disabled
+                                >
                                   <Eye className="w-3 h-3 mr-1" />
-                                  Review
+                                  View Only
                                 </Button>
                               </div>
                             </CardContent>
@@ -621,8 +744,8 @@ const PastEventDetails = () => {
             </div>
 
             {/* Sidebar */}
-            <div className="space-y-4">
-              <Card className="border lg:sticky lg:top-4">
+            <div className="space-y-6">
+              <Card className="border">
                 <CardHeader className="p-4 pb-2">
                   <CardTitle className="text-base">Event Summary</CardTitle>
                 </CardHeader>
@@ -634,7 +757,7 @@ const PastEventDetails = () => {
                   <div>
                     <h4 className="font-semibold text-xs text-muted-foreground">Duration</h4>
                     <p className="text-sm">
-                      {formatDateTime(event.startDate).split(',')[0]} - {formatDateTime(event.endDate).split(',')[0]}
+                      {formatDateShort(event.startDate)} - {formatDateShort(event.endDate)}
                     </p>
                   </div>
                   <div>
@@ -644,6 +767,10 @@ const PastEventDetails = () => {
                   <div>
                     <h4 className="font-semibold text-xs text-muted-foreground">Challenges</h4>
                     <p className="text-sm">{challenges.length} total</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-xs text-muted-foreground">Active Solvers</h4>
+                    <p className="text-sm">{userStats.length} participant{userStats.length !== 1 ? 's' : ''}</p>
                   </div>
                   {isRegistered && userRank && (
                     <div>
@@ -661,39 +788,65 @@ const PastEventDetails = () => {
               </Card>
 
               {/* Top Performers */}
-              {userStats.length > 0 && (
+              {userStats.length > 0 ? (
                 <Card className="border">
                   <CardHeader className="p-4 pb-2">
                     <CardTitle className="flex items-center gap-2 text-base">
-                      <Trophy className="w-4 h-4 text-yellow-600" />
+                      <Medal className="w-4 h-4 text-yellow-600" />
                       Top Performers
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-4 pt-2">
                     <div className="space-y-2">
-                      {userStats.slice(0, 5).map((stat, index) => (
-                        <div key={stat.userId} className="flex items-center justify-between text-sm">
-                          <div className="flex items-center gap-2">
-                            <span className={`font-mono w-6 text-center ${
-                              index === 0 ? 'text-yellow-600 font-bold' : 
-                              index === 1 ? 'text-gray-600 font-bold' : 
-                              index === 2 ? 'text-orange-600 font-bold' : 'text-muted-foreground'
+                      {userStats.slice(0, 3).map((stat) => (
+                        <div 
+                          key={stat.userId} 
+                          className={`flex items-center justify-between p-3 rounded-lg ${
+                            stat.userId === user?.uid 
+                              ? 'bg-blue-500/10 border border-blue-200' 
+                              : 'bg-muted/30'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold ${
+                              stat.rank === 1 ? 'bg-yellow-500' :
+                              stat.rank === 2 ? 'bg-gray-400' :
+                              stat.rank === 3 ? 'bg-orange-700' : 'bg-blue-500'
                             }`}>
-                              #{stat.rank}
-                            </span>
-                            <span className="truncate">{stat.username}</span>
+                              {stat.rank}
+                            </div>
+                            <div>
+                              <p className="font-medium text-sm">
+                                {stat.username}
+                                {stat.userId === user?.uid && (
+                                  <span className="ml-1 text-xs text-blue-600">(You)</span>
+                                )}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {stat.challengesSolved} challenge{stat.challengesSolved !== 1 ? 's' : ''} solved
+                              </p>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-muted-foreground text-xs">
-                              {stat.challengesSolved} solves
-                            </span>
-                            <Badge variant="outline" className="font-mono text-xs">
-                              {stat.totalPoints}
-                            </Badge>
+                          <div className="text-right">
+                            <p className="font-bold text-sm">{stat.totalPoints} pts</p>
                           </div>
                         </div>
                       ))}
                     </div>
+                    {userStats.length > 3 && (
+                      <div className="mt-3 text-center">
+                        <p className="text-xs text-muted-foreground">
+                          Showing top 3 of {userStats.length} participants
+                        </p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card className="border">
+                  <CardContent className="p-4 text-center">
+                    <BarChart className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
+                    <p className="text-sm text-muted-foreground">No one solved challenges in this event</p>
                   </CardContent>
                 </Card>
               )}
