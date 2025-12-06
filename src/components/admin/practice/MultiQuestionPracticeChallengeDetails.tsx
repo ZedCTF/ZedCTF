@@ -131,7 +131,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
     }
   }, [challengeId]);
 
-  // Real-time listener for submissions with index error handling
+  // Real-time listener for submissions
   useEffect(() => {
     if (!user || !challengeId) {
       console.log("No user or challengeId, skipping submissions listener");
@@ -140,75 +140,35 @@ const MultiQuestionPracticeChallengeDetails = () => {
 
     console.log("Setting up real-time submissions listener for user:", user.uid, "challenge:", challengeId);
     
-    // First try with the complete query (with orderBy)
-    const tryCompleteQuery = () => {
-      const submissionsQuery = query(
-        collection(db, "submissions"),
-        where("challengeId", "==", challengeId),
-        where("userId", "==", user.uid),
-        orderBy("submittedAt", "desc")
-      );
+    const submissionsQuery = query(
+      collection(db, "submissions"),
+      where("challengeId", "==", challengeId),
+      where("userId", "==", user.uid)
+    );
 
-      return onSnapshot(submissionsQuery, 
-        (snapshot) => {
-          const submissionsData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as Submission[];
-          
-          console.log("Real-time submissions update (with orderBy):", submissionsData.length, "submissions");
-          setAllSubmissions(submissionsData);
-          setIsDataLoaded(true);
-        }, 
-        (error) => {
-          console.error("Error in submissions listener (with orderBy):", error);
-          
-          // If we get an index error, try without orderBy
-          if (error.code === 'failed-precondition' || error.message.includes('requires an index')) {
-            console.log("Index error detected, trying without orderBy...");
-            tryFallbackQuery();
-          } else {
-            setIsDataLoaded(true);
-          }
-        }
-      );
-    };
-
-    // Fallback query without orderBy (if index is missing)
-    const tryFallbackQuery = () => {
-      const fallbackQuery = query(
-        collection(db, "submissions"),
-        where("challengeId", "==", challengeId),
-        where("userId", "==", user.uid)
-      );
-
-      return onSnapshot(fallbackQuery, 
-        (snapshot) => {
-          const submissionsData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as Submission[];
-          
-          // Sort manually in JavaScript
-          submissionsData.sort((a, b) => {
-            const dateA = a.submittedAt?.toDate?.() || new Date(a.submittedAt);
-            const dateB = b.submittedAt?.toDate?.() || new Date(b.submittedAt);
-            return dateB.getTime() - dateA.getTime(); // Descending
-          });
-          
-          console.log("Real-time submissions update (fallback):", submissionsData.length, "submissions");
-          setAllSubmissions(submissionsData);
-          setIsDataLoaded(true);
-        }, 
-        (error) => {
-          console.error("Error in fallback submissions listener:", error);
-          setIsDataLoaded(true);
-        }
-      );
-    };
-
-    // Start with the complete query
-    const unsubscribe = tryCompleteQuery();
+    const unsubscribe = onSnapshot(submissionsQuery, 
+      (snapshot) => {
+        const submissionsData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Submission[];
+        
+        // Sort manually by date
+        submissionsData.sort((a, b) => {
+          const dateA = a.submittedAt?.toDate?.() || new Date(a.submittedAt);
+          const dateB = b.submittedAt?.toDate?.() || new Date(b.submittedAt);
+          return dateB.getTime() - dateA.getTime();
+        });
+        
+        console.log("Real-time submissions update:", submissionsData.length, "submissions");
+        setAllSubmissions(submissionsData);
+        setIsDataLoaded(true);
+      }, 
+      (error) => {
+        console.error("Error in submissions listener:", error);
+        setIsDataLoaded(true);
+      }
+    );
     
     return () => unsubscribe();
   }, [user, challengeId]);
@@ -231,11 +191,6 @@ const MultiQuestionPracticeChallengeDetails = () => {
     console.log("User ID:", user.uid);
     console.log("Total submissions:", allSubmissions.length);
     console.log("Challenge has", challenge.questions.length, "questions");
-    
-    // Debug: Log all submissions
-    allSubmissions.forEach((sub, idx) => {
-      console.log(`Submission ${idx}: flag="${sub.flag}", correct=${sub.isCorrect}, points=${sub.pointsAwarded}, qIndex=${sub.questionIndex}, qId=${sub.questionId}`);
-    });
     
     const initialQuestionStates: QuestionState[] = challenge.questions.map((question, index) => {
       // Find ALL submissions for this user
@@ -267,21 +222,11 @@ const MultiQuestionPracticeChallengeDetails = () => {
         }
       }
       
-      // Strategy 3: If still no match, try by questionIndex (LEAST RELIABLE - only if nothing else works)
+      // Strategy 3: If still no match, try by questionIndex
       if (questionSubmissions.length === 0) {
         const matchingByIndex = userSubmissions.filter(sub => sub.questionIndex === index);
         if (matchingByIndex.length > 0) {
           console.log(`Question ${index} (Q${index + 1}) matched by questionIndex: ${index}`, matchingByIndex.length, "submissions");
-          
-          // Additional verification: check if the flag makes sense
-          const questionFlag = question.flag?.trim().toLowerCase();
-          matchingByIndex.forEach(sub => {
-            const submissionFlag = sub.flag?.trim().toLowerCase();
-            if (questionFlag && submissionFlag && questionFlag !== submissionFlag) {
-              console.warn(`WARNING: Question ${index} flag "${questionFlag}" doesn't match submission flag "${submissionFlag}" even though index matches!`);
-            }
-          });
-          
           questionSubmissions = matchingByIndex;
         }
       }
@@ -481,7 +426,8 @@ const MultiQuestionPracticeChallengeDetails = () => {
           console.log("Awarding points to user:", pointsToAward);
           await updateDoc(doc(db, "users", user.uid), {
             totalPoints: increment(pointsToAward),
-            challengesSolved: arrayUnion(challenge.id)
+            challengesSolved: arrayUnion(challenge.id),
+            lastSolvedAt: new Date() // CRITICAL: Add this for leaderboard updates
           });
         }
 
@@ -507,7 +453,12 @@ const MultiQuestionPracticeChallengeDetails = () => {
           } : q
         ));
         
-        // The real-time listener will update allSubmissions automatically
+        // Refresh submissions after a short delay
+        setTimeout(() => {
+          // The real-time listener will update allSubmissions automatically
+          // But we can force a re-initialization
+          initializeQuestionStates();
+        }, 500);
         
       } else {
         console.log("Flag is incorrect");
@@ -803,10 +754,10 @@ const MultiQuestionPracticeChallengeDetails = () => {
             </CardContent>
           </Card>
 
-          {/* Question Selector */}
+          {/* Question Selector - Mobile Optimized */}
           <Card className="mb-4 border">
             <CardContent className="p-3">
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-1 overflow-x-auto pb-2 -mx-1 px-1">
                 {challenge.questions?.map((question, index) => {
                   const qState = questionStates[index] || {
                     isSolved: false,
@@ -826,7 +777,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
                         setActiveQuestionIndex(index);
                         setActiveTab("question");
                       }}
-                      className={`h-8 px-2 sm:px-3 ${
+                      className={`h-8 px-2 sm:px-3 flex-shrink-0 ${
                         isLocked 
                           ? 'bg-green-500/10 text-green-600 hover:bg-green-500/20 border-green-200' 
                           : isSolved 
@@ -850,56 +801,56 @@ const MultiQuestionPracticeChallengeDetails = () => {
             </CardContent>
           </Card>
 
-          {/* Main Content */}
+          {/* Main Content - Mobile Optimized */}
           <div className="flex flex-col lg:grid lg:grid-cols-3 gap-4">
             {/* Main Content - Full width on mobile */}
             <div className="lg:col-span-2 space-y-4">
               {/* Mobile-optimized tabs */}
               <div className="w-full">
-                {/* Tabs Header */}
+                {/* Tabs Header - Scrollable on mobile */}
                 <div className="flex overflow-x-auto scrollbar-hide mb-4 bg-muted/30 rounded-lg p-1">
                   <button
                     onClick={() => setActiveTab("description")}
-                    className={`flex-1 min-w-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                    className={`flex-shrink-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                       activeTab === "description" 
                         ? "bg-background text-foreground shadow-sm" 
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    Challenge Description
+                    Description
                   </button>
                   <button
                     onClick={() => setActiveTab("question")}
-                    className={`flex-1 min-w-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                    className={`flex-shrink-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                       activeTab === "question" 
                         ? "bg-background text-foreground shadow-sm" 
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    Question {activeQuestionIndex + 1}
+                    Q{activeQuestionIndex + 1}
                     {isQuestionLocked(activeQuestionIndex) && (
                       <Lock className="w-3 h-3 ml-1 inline" />
                     )}
                   </button>
                   <button
                     onClick={() => setActiveTab("hints")}
-                    className={`flex-1 min-w-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                    className={`flex-shrink-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                       activeTab === "hints" 
                         ? "bg-background text-foreground shadow-sm" 
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    Hints ({challenge.hints?.length || 0})
+                    Hints
                   </button>
                   <button
                     onClick={() => setActiveTab("files")}
-                    className={`flex-1 min-w-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                    className={`flex-shrink-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                       activeTab === "files" 
                         ? "bg-background text-foreground shadow-sm" 
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    Files ({(challenge.questions?.[activeQuestionIndex]?.files?.length || 0) + (challenge.files?.length || 0)})
+                    Files
                   </button>
                 </div>
 
@@ -937,7 +888,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
                     <Card className="border">
                       <CardContent className="p-4 sm:p-6">
                         <div className="space-y-3 break-words">
-                          <div className="flex items-center justify-between mb-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
                             <div className="flex items-center gap-2">
                               <h3 className="font-bold text-lg">Question {activeQuestionIndex + 1}</h3>
                               {isQuestionLocked(activeQuestionIndex) && (
@@ -947,7 +898,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
                                 </Badge>
                               )}
                             </div>
-                            <Badge variant="outline" className="font-mono font-semibold">
+                            <Badge variant="outline" className="font-mono font-semibold self-start">
                               {challenge.questions?.[activeQuestionIndex]?.points || 0} pts
                             </Badge>
                           </div>
@@ -1174,7 +1125,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
               </div>
             </div>
 
-            {/* Sidebar */}
+            {/* Sidebar - Mobile Optimized */}
             <div className="space-y-4">
               {/* Flag Submission */}
               <Card className="border lg:sticky lg:top-4">
@@ -1261,7 +1212,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
                 </CardContent>
               </Card>
 
-              {/* Progress Summary */}
+              {/* Progress Summary - Mobile Optimized */}
               <Card className="border">
                 <CardHeader className="p-4 pb-2">
                   <CardTitle className="text-base">Your Progress</CardTitle>
@@ -1300,7 +1251,7 @@ const MultiQuestionPracticeChallengeDetails = () => {
                 </CardContent>
               </Card>
 
-              {/* Submission History */}
+              {/* Submission History - Mobile Optimized */}
               {questionStates[activeQuestionIndex]?.submissions && questionStates[activeQuestionIndex].submissions.length > 0 && (
                 <Card className="border">
                   <CardHeader className="p-4 pb-2">

@@ -165,8 +165,7 @@ const PracticeChallengeDetails = () => {
 
     // Check if this is a multi-question challenge - redirect to multi-question component
     if (challenge.hasMultipleQuestions) {
-      // This should be handled by routing, but just in case
-      console.warn("Multi-question challenge detected in single challenge component");
+      navigate(`/practice/multi/${challengeId}`);
       return;
     }
 
@@ -214,7 +213,8 @@ const PracticeChallengeDetails = () => {
         if (pointsToAward > 0) {
           await updateDoc(doc(db, "users", user.uid), {
             totalPoints: increment(pointsToAward),
-            challengesSolved: arrayUnion(challenge.id)
+            challengesSolved: arrayUnion(challenge.id),
+            lastSolvedAt: new Date() // ADD THIS for leaderboard tie-breaking
           });
         }
 
