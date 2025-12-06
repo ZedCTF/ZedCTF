@@ -3,7 +3,7 @@ import { Trophy, Target, Users, AlertCircle, Clock, ArrowLeft, Crown, Medal, Shi
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useEffect, useState } from "react";
 import { db } from "../firebase";
-import { collection, query, getDocs, where, doc, getDoc, orderBy } from "firebase/firestore";
+import { collection, query, getDocs, where, doc, getDoc, orderBy, onSnapshot } from "firebase/firestore";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -60,19 +60,19 @@ const LiveLeaderboard = () => {
         const data = doc.data();
         console.log(`📊 Event: ${data.name}, Status: ${data.status}`);
         
-        // Include any event that might be considered "live"
-        if (data.status && (
-          data.status === 'LIVE NOW' || 
-          data.status.toLowerCase().includes('live') ||
-          data.status.toLowerCase().includes('active') ||
-          data.status === 'live' ||
-          data.status === 'LIVE'
-        )) {
+        // Check if event is currently live based on dates
+        const now = new Date();
+        const startDate = new Date(data.startDate);
+        const endDate = new Date(data.endDate);
+        const isLive = now >= startDate && now <= endDate;
+        
+        if (isLive || data.status === 'LIVE' || data.status === 'live' || 
+            data.status === 'LIVE NOW' || data.status === 'active') {
           eventsData.push({
             id: doc.id,
             name: data.name,
             title: data.title,
-            status: data.status,
+            status: data.status || (isLive ? 'LIVE' : 'ENDED'),
             participants: data.participants || [],
             registeredUsers: data.registeredUsers || [],
             startDate: data.startDate,
@@ -95,16 +95,18 @@ const LiveLeaderboard = () => {
     }
   };
 
-  // REAL scoring logic - EXACTLY like LiveEventDetails.tsx
+  // REAL scoring logic - IMPROVED VERSION
   const fetchEventLeaderboard = async (eventId: string) => {
-    if (!eventId) return;
+    if (!eventId) {
+      console.log("❌ No event ID provided");
+      setCtfTeams([]);
+      return;
+    }
 
     try {
       console.log("🏆 Fetching leaderboard for event:", eventId);
       
-      let leaderboardData: CTFTeam[] = [];
-
-      // First, get the event to check participants
+      // Get the event to check participants
       const eventDoc = await getDoc(doc(db, "events", eventId));
       if (!eventDoc.exists()) {
         console.log("❌ Event not found");
@@ -113,122 +115,127 @@ const LiveLeaderboard = () => {
       }
       
       const eventData = eventDoc.data();
-      const participants = eventData.participants || eventData.registeredUsers || [];
-      console.log("👥 Event participants:", participants);
+      console.log("📊 Event data:", eventData);
       
-      if (participants.length === 0) {
-        console.log("ℹ️ No participants found for this event");
-        setCtfTeams([]);
-        return;
-      }
-
-      // Get ALL challenges that belong to this event
-      const challengesQuery = query(
-        collection(db, "challenges"),
-        where("eventId", "==", eventId)
+      // Get ALL submissions for this event - not just participant submissions
+      console.log("🔍 Getting ALL event submissions...");
+      const eventSubmissionsQuery = query(
+        collection(db, "submissions"),
+        where("eventId", "==", eventId),
+        where("isCorrect", "==", true)
       );
-      const challengesSnapshot = await getDocs(challengesQuery);
-      const eventChallengeIds = new Set<string>();
-      const challengePoints: { [key: string]: number } = {};
       
-      challengesSnapshot.forEach(doc => {
-        const data = doc.data();
-        eventChallengeIds.add(doc.id);
-        challengePoints[doc.id] = data.points || 0;
+      const eventSubmissionsSnapshot = await getDocs(eventSubmissionsQuery);
+      console.log("📊 Total correct submissions in event:", eventSubmissionsSnapshot.size);
+      
+      // Group submissions by user
+      const userScoresMap: { [key: string]: CTFTeam } = {};
+      const userChallengeMap: { [key: string]: Map<string, { points: number, questionIndices: Set<number> }> } = {};
+      
+      eventSubmissionsSnapshot.forEach(doc => {
+        const submission = doc.data();
+        const userId = submission.userId;
+        const challengeId = submission.challengeId;
+        const questionIndex = submission.questionIndex;
+        const isOverallFlag = submission.isOverallFlag;
+        
+        if (!userId) return;
+        
+        // Initialize user data if not exists
+        if (!userScoresMap[userId]) {
+          userScoresMap[userId] = {
+            userId: userId,
+            name: "Loading...",
+            points: 0,
+            solvedChallenges: 0,
+            rank: 0,
+            status: "Active now",
+            progress: "No challenges solved"
+          };
+          userChallengeMap[userId] = new Map();
+        }
+        
+        if (!userChallengeMap[userId].has(challengeId)) {
+          userChallengeMap[userId].set(challengeId, { 
+            points: 0, 
+            questionIndices: new Set<number>() 
+          });
+        }
+        
+        const challengeData = userChallengeMap[userId].get(challengeId)!;
+        const points = submission.pointsAwarded || submission.points || 0;
+        
+        // For multi-question challenges
+        if (questionIndex !== undefined && questionIndex !== null) {
+          // Only add points if this question hasn't been counted before
+          if (!challengeData.questionIndices.has(questionIndex)) {
+            challengeData.points += points;
+            challengeData.questionIndices.add(questionIndex);
+            console.log(`✅ ${userId} solved question ${questionIndex} of ${challengeId}: +${points}pts`);
+          }
+        } 
+        // For overall flag submission (multi-question completion bonus or regular challenge)
+        else if (isOverallFlag === true) {
+          // This is the overall completion for multi-question challenge
+          challengeData.points = points; // Use the overall points
+          console.log(`🏆 ${userId} completed multi-question challenge ${challengeId}: +${points}pts`);
+        }
+        // For regular single-question challenges
+        else {
+          challengeData.points = points; // Just set the points
+          console.log(`✅ ${userId} solved single challenge ${challengeId}: +${points}pts`);
+        }
       });
       
-      console.log("🎯 Challenges in event:", Array.from(eventChallengeIds));
-
-      // Get EVENT-SPECIFIC correct submissions by participants
-      const userScores: { [key: string]: CTFTeam } = {};
-      const userChallengeMap: { [key: string]: Set<string> } = {};
-
-      // For each participant, get their EVENT submissions for event challenges
-      for (const participantId of participants) {
-        console.log(`🔍 Processing participant: ${participantId}`);
-        
-        // Get EVENT-SPECIFIC correct submissions by this participant
-        const userSubmissionsQuery = query(
-          collection(db, "submissions"),
-          where("userId", "==", participantId),
-          where("eventId", "==", eventId),
-          where("isCorrect", "==", true)
-        );
-        
-        const userSubmissionsSnapshot = await getDocs(userSubmissionsQuery);
-        let userScore = 0;
+      // Calculate total scores
+      Object.keys(userScoresMap).forEach(userId => {
+        let totalScore = 0;
         let solvedCount = 0;
-
-        if (!userChallengeMap[participantId]) {
-          userChallengeMap[participantId] = new Set();
-        }
-
-        userSubmissionsSnapshot.forEach(doc => {
-          const submission = doc.data();
-          const challengeId = submission.challengeId;
-          
-          // Check if this submission is for a challenge in our event
-          if (challengeId && eventChallengeIds.has(challengeId)) {
-            // Only count each challenge once per user
-            if (!userChallengeMap[participantId].has(challengeId)) {
-              const points = submission.pointsAwarded || submission.points || challengePoints[challengeId] || 0;
-              userScore += points;
-              solvedCount += 1;
-              userChallengeMap[participantId].add(challengeId);
-              console.log(`✅ ${participantId} solved ${challengeId} in event: ${points}pts`);
-            }
-          }
+        
+        userChallengeMap[userId].forEach((challengeData, challengeId) => {
+          totalScore += challengeData.points;
+          solvedCount += 1; // Count each challenge as solved if it has any points
         });
-
-        // Get username
-        let username = "User";
-        let photoURL = "";
-        let role = "Hacker";
-        let institution = "";
-
-        try {
-          const userDoc = await getDoc(doc(db, "users", participantId));
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
-            username = userData.username || userData.displayName || userData.email?.split('@')[0] || "User";
-            photoURL = userData.photoURL || "";
-            role = userData.role || "Hacker";
-            institution = userData.institution || "";
-          }
-        } catch (userError) {
-          console.log("❌ Could not fetch user data for participant:", participantId);
-        }
-
-        // Determine status and progress
-        const status = "Active now";
-        const progress = solvedCount > 0 
+        
+        userScoresMap[userId].points = totalScore;
+        userScoresMap[userId].solvedChallenges = solvedCount;
+        userScoresMap[userId].progress = solvedCount > 0 
           ? `${solvedCount} challenge${solvedCount !== 1 ? 's' : ''} solved`
           : "No challenges solved";
-
-        userScores[participantId] = {
-          userId: participantId,
-          name: username,
-          points: userScore,
-          solvedChallenges: solvedCount,
-          rank: 0,
-          photoURL: photoURL,
-          role: role,
-          institution: institution,
-          status: status,
-          progress: progress
-        };
-
-        console.log(`📊 Final event score for ${username}: ${userScore}pts, ${solvedCount} challenges`);
+      });
+      
+      // Fetch usernames for all users
+      const userIds = Object.keys(userScoresMap);
+      console.log("👥 Users with submissions:", userIds);
+      
+      for (const userId of userIds) {
+        try {
+          const userDoc = await getDoc(doc(db, "users", userId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            userScoresMap[userId].name = 
+              userData.username || 
+              userData.displayName || 
+              userData.email?.split('@')[0] || 
+              "User";
+            userScoresMap[userId].photoURL = userData.photoURL || "";
+            userScoresMap[userId].role = userData.role || "Hacker";
+            userScoresMap[userId].institution = userData.institution || "";
+          }
+        } catch (userError) {
+          console.log("❌ Could not fetch user data for:", userId);
+          userScoresMap[userId].name = "User";
+        }
       }
-
-      // Sort by score and assign ranks
-      leaderboardData = Object.values(userScores)
+      
+      // Convert to array, sort, and assign ranks
+      let leaderboardData = Object.values(userScoresMap)
         .sort((a, b) => b.points - a.points)
         .map((user, index) => ({
           ...user,
           rank: index + 1
         }));
-
+      
       console.log("🏅 Final event leaderboard:", leaderboardData);
       setCtfTeams(leaderboardData);
       
@@ -466,8 +473,9 @@ const LiveLeaderboard = () => {
                   {currentEvent && (
                     <div className="mt-4 text-xs text-muted-foreground">
                       <p>Current Event: <strong>{currentEvent.name}</strong></p>
-                      <p>Participants: <strong>{currentEvent.participants?.length || 0}</strong></p>
                       <p>Status: <strong>{currentEvent.status}</strong></p>
+                      <p>Start: <strong>{new Date(currentEvent.startDate).toLocaleDateString()}</strong></p>
+                      <p>End: <strong>{new Date(currentEvent.endDate).toLocaleDateString()}</strong></p>
                     </div>
                   )}
                 </div>
