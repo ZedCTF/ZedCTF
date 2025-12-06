@@ -38,6 +38,7 @@ interface Event {
   requiresParticipantPayment?: boolean;
   individualPrice?: number;
   currency?: string;
+  assignedModerators?: string[]; // Array of moderator UIDs
 }
 
 interface Challenge {
@@ -494,7 +495,7 @@ const UpcomingEventDetails = () => {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [isRegistered, setIsRegistered] = useState(false);
   const [isPendingApproval, setIsPendingApproval] = useState(false);
-  const [isEventOwner, setIsEventOwner] = useState(false);
+  const [hasChallengePreviewAccess, setHasChallengePreviewAccess] = useState(false);
   const [challengesLoaded, setChallengesLoaded] = useState(false);
   const [timeLeft, setTimeLeft] = useState<TimeLeft | null>(null);
   const [showRegistrationDialog, setShowRegistrationDialog] = useState(false);
@@ -534,9 +535,20 @@ const UpcomingEventDetails = () => {
             const userPending = eventData.pendingApprovals?.includes(user.uid);
             setIsPendingApproval(!!userPending);
             
-            const isOwner = eventData.createdById === user.uid;
-            const hasAdminAccess = isAdmin || isModerator;
-            setIsEventOwner(isOwner || hasAdminAccess);
+            // Check preview access based on permissions
+            let hasAccess = false;
+            
+            if (isAdmin) {
+              hasAccess = true; // Admin can always preview
+            } else if (eventData.createdById === user.uid) {
+              hasAccess = true; // Event creator can always preview
+            } else if (isModerator) {
+              // Moderator can preview if assigned to this event
+              const assignedModerators = eventData.assignedModerators || [];
+              hasAccess = assignedModerators.includes(user.uid);
+            }
+            
+            setHasChallengePreviewAccess(hasAccess);
           }
         }
       },
@@ -600,9 +612,20 @@ const UpcomingEventDetails = () => {
           const userPending = eventData.pendingApprovals?.includes(user.uid);
           setIsPendingApproval(!!userPending);
           
-          const isOwner = eventData.createdById === user.uid;
-          const hasAdminAccess = isAdmin || isModerator;
-          setIsEventOwner(isOwner || hasAdminAccess);
+          // Check preview access based on permissions
+          let hasAccess = false;
+          
+          if (isAdmin) {
+            hasAccess = true; // Admin can always preview
+          } else if (eventData.createdById === user.uid) {
+            hasAccess = true; // Event creator can always preview
+          } else if (isModerator) {
+            // Moderator can preview if assigned to this event
+            const assignedModerators = eventData.assignedModerators || [];
+            hasAccess = assignedModerators.includes(user.uid);
+          }
+          
+          setHasChallengePreviewAccess(hasAccess);
         }
       } else {
         setMessage({ type: 'error', text: 'Event not found' });
@@ -634,7 +657,7 @@ const UpcomingEventDetails = () => {
         challengesData.push({
           id: doc.id,
           title: data.title,
-          description: isEventOwner ? data.description : "Challenge details will be available when the event starts",
+          description: hasChallengePreviewAccess ? data.description : "Challenge details will be available when the event starts",
           category: data.finalCategory || data.category,
           points: data.points,
           difficulty: data.difficulty,
@@ -778,9 +801,9 @@ const UpcomingEventDetails = () => {
     navigate("/live");
   };
 
-  // Handle challenge click - ONLY for admins/event owners to preview upcoming challenges
+  // Handle challenge click - ONLY for users with preview access
   const handleChallengeClick = (challenge: Challenge) => {
-    if (isEventOwner) {
+    if (hasChallengePreviewAccess) {
       // Navigate to upcoming challenge preview for admins/event owners
       navigate(`/event/upcoming/${eventId}/challenge/${challenge.id}`);
     } else {
@@ -836,9 +859,9 @@ const UpcomingEventDetails = () => {
     return event.currency || 'ZMW';
   };
 
-  // Get challenge access status for UI display - ONLY for admins/event owners
+  // Get challenge access status for UI display
   const getChallengeAccessStatus = (challenge: Challenge) => {
-    if (isEventOwner) {
+    if (hasChallengePreviewAccess) {
       return { accessible: true, message: "Admin Preview Access" };
     }
     
@@ -973,10 +996,10 @@ const UpcomingEventDetails = () => {
                   Pending Approval
                 </Badge>
               )}
-              {isEventOwner && (
+              {hasChallengePreviewAccess && (
                 <Badge className="bg-purple-500/20 text-purple-600 border-purple-200 text-xs">
                   <Shield className="w-3 h-3 mr-1" />
-                  Event Owner/Admin
+                  Preview Access
                 </Badge>
               )}
               {isEventFull && (
@@ -1076,8 +1099,8 @@ const UpcomingEventDetails = () => {
 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-2 mb-6">
-            {/* Manage Button for Owners/Admins */}
-            {isEventOwner && (
+            {/* Manage Button for Preview Access Users */}
+            {hasChallengePreviewAccess && (
               <Button 
                 onClick={manageEvent}
                 variant="outline"
@@ -1089,7 +1112,7 @@ const UpcomingEventDetails = () => {
             )}
             
             {/* Register Button */}
-            {!isRegistered && !isPendingApproval && user && !isEventOwner && !isEventFull && (
+            {!isRegistered && !isPendingApproval && user && !hasChallengePreviewAccess && !isEventFull && (
               <Button 
                 onClick={registerForEvent} 
                 disabled={registering}
@@ -1156,9 +1179,9 @@ const UpcomingEventDetails = () => {
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Shield className="w-4 h-4" />
                     Upcoming Challenges ({challenges.length})
-                    {isEventOwner ? (
+                    {hasChallengePreviewAccess ? (
                       <Badge variant="outline" className="text-xs bg-purple-500/20 text-purple-600 border-purple-300">
-                        Admin Preview Access
+                        Preview Access
                       </Badge>
                     ) : (
                       <Badge variant="outline" className="text-xs">
@@ -1166,16 +1189,16 @@ const UpcomingEventDetails = () => {
                       </Badge>
                     )}
                   </CardTitle>
-                  {!isEventOwner && (
+                  {!hasChallengePreviewAccess && (
                     <CardDescription className="text-xs flex items-center gap-1">
                       <Lock className="w-3 h-3" />
                       Challenges will unlock automatically when the event starts
                     </CardDescription>
                   )}
-                  {isEventOwner && (
+                  {hasChallengePreviewAccess && (
                     <CardDescription className="text-xs flex items-center gap-1 text-purple-600">
                       <Eye className="w-3 h-3" />
-                      You have admin preview access to view challenge details
+                      You have preview access to view challenge details
                     </CardDescription>
                   )}
                   {!challengesLoaded && (
@@ -1189,7 +1212,7 @@ const UpcomingEventDetails = () => {
                     <div className="text-center py-4">
                       <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
                       <p className="text-sm text-muted-foreground">No challenges preview available for this event yet.</p>
-                      {isEventOwner && (
+                      {hasChallengePreviewAccess && (
                         <Button 
                           onClick={manageEvent}
                           variant="outline" 
@@ -1307,11 +1330,11 @@ const UpcomingEventDetails = () => {
                     <h4 className="font-semibold text-xs text-muted-foreground">Challenges</h4>
                     <p className="text-sm">{challenges.length} preview</p>
                   </div>
-                  {isEventOwner && (
+                  {hasChallengePreviewAccess && (
                     <div>
-                      <h4 className="font-semibold text-xs text-muted-foreground">Your Role</h4>
-                      <p className="text-sm text-purple-600 font-medium">Event Owner/Admin</p>
-                      <p className="text-xs text-muted-foreground mt-1">You have preview access to challenges</p>
+                      <h4 className="font-semibold text-xs text-muted-foreground">Your Access</h4>
+                      <p className="text-sm text-purple-600 font-medium">Preview Access</p>
+                      <p className="text-xs text-muted-foreground mt-1">You can view challenge details before event starts</p>
                     </div>
                   )}
                 </CardContent>
