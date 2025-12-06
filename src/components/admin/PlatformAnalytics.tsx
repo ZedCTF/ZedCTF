@@ -9,14 +9,20 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
-  BarChart3, 
   Users, 
   Shield, 
   Trophy, 
   Clock,
   Calendar,
   TrendingUp,
-  Download
+  Download,
+  ArrowLeft,
+  ChevronDown,
+  ChevronUp,
+  BarChart,
+  Target,
+  Award,
+  Zap
 } from "lucide-react";
 import { 
   collection, 
@@ -24,6 +30,13 @@ import {
   Timestamp
 } from "firebase/firestore";
 import { db } from "@/firebase";
+import { 
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue 
+} from "@/components/ui/select";
 
 interface PlatformAnalyticsProps {
   onBack: () => void;
@@ -89,10 +102,16 @@ const PlatformAnalytics = ({ onBack }: PlatformAnalyticsProps) => {
   });
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'all'>('30d');
+  const [expandedSection, setExpandedSection] = useState<string | null>(null);
+  const [showAllStats, setShowAllStats] = useState(false);
 
   useEffect(() => {
     fetchAnalyticsData();
   }, [timeRange]);
+
+  const toggleSection = (section: string) => {
+    setExpandedSection(expandedSection === section ? null : section);
+  };
 
   const fetchAnalyticsData = async () => {
     try {
@@ -353,82 +372,99 @@ const PlatformAnalytics = ({ onBack }: PlatformAnalyticsProps) => {
     return data;
   };
 
-  const stats = [
-    {
-      title: "Total Users",
-      value: analyticsData.totalUsers,
-      description: "Registered users",
-      icon: Users,
-      color: "text-blue-600",
-      change: "+12%",
-      trend: "up" as const
-    },
-    {
-      title: "Active Users (30d)",
-      value: analyticsData.activeUsers,
-      description: "Recently active users",
-      icon: Users,
-      color: "text-green-600",
-      change: "+8%",
-      trend: "up" as const
-    },
-    {
-      title: "Total Challenges",
-      value: analyticsData.totalChallenges,
-      description: "Active challenges",
-      icon: Shield,
-      color: "text-purple-600",
-      change: "+5%",
-      trend: "up" as const
-    },
-    {
-      title: "Challenge Solves",
-      value: analyticsData.solvedChallenges,
-      description: "Total solutions submitted",
-      icon: Trophy,
-      color: "text-orange-600",
-      change: "+23%",
-      trend: "up" as const
-    },
-    {
-      title: "Success Rate",
-      value: analyticsData.totalSubmissions > 0 ? 
-        `${Math.round((analyticsData.successfulSubmissions / analyticsData.totalSubmissions) * 100)}%` : 
-        "0%",
-      description: "Successful submissions",
-      icon: TrendingUp,
-      color: "text-red-600",
-      change: "+2%",
-      trend: "up" as const
-    },
-    {
-      title: "Avg Solve Time",
-      value: analyticsData.averageSolveTime,
-      description: "Average time to solve",
-      icon: Clock,
-      color: "text-indigo-600",
-      change: "-15m",
-      trend: "down" as const
-    },
-    {
-      title: "Total Events",
-      value: analyticsData.totalEvents,
-      description: "All events created",
-      icon: Calendar,
-      color: "text-teal-600",
-      change: "+3",
-      trend: "up" as const
-    },
-    {
-      title: "Active Events",
-      value: analyticsData.activeEvents,
-      description: "Live/upcoming events",
-      icon: Calendar,
-      color: "text-yellow-600",
-      change: "+1",
-      trend: "up" as const
-    }
-  ];
+  // Group stats by category for better organization
+  const groupedStats = {
+    userStats: [
+      {
+        title: "Total Users",
+        value: analyticsData.totalUsers,
+        description: "Registered users",
+        icon: Users,
+        color: "text-blue-600",
+        bgColor: "bg-blue-500/10",
+        change: "+12%",
+        trend: "up" as const
+      },
+      {
+        title: "Active Users (30d)",
+        value: analyticsData.activeUsers,
+        description: "Recently active",
+        icon: Users,
+        color: "text-green-600",
+        bgColor: "bg-green-500/10",
+        change: "+8%",
+        trend: "up" as const
+      }
+    ],
+    challengeStats: [
+      {
+        title: "Total Challenges",
+        value: analyticsData.totalChallenges,
+        description: "Active challenges",
+        icon: Shield,
+        color: "text-purple-600",
+        bgColor: "bg-purple-500/10",
+        change: "+5%",
+        trend: "up" as const
+      },
+      {
+        title: "Challenge Solves",
+        value: analyticsData.solvedChallenges,
+        description: "Total solutions",
+        icon: Trophy,
+        color: "text-orange-600",
+        bgColor: "bg-orange-500/10",
+        change: "+23%",
+        trend: "up" as const
+      }
+    ],
+    performanceStats: [
+      {
+        title: "Success Rate",
+        value: analyticsData.totalSubmissions > 0 ? 
+          `${Math.round((analyticsData.successfulSubmissions / analyticsData.totalSubmissions) * 100)}%` : 
+          "0%",
+        description: "Correct submissions",
+        icon: Target,
+        color: "text-red-600",
+        bgColor: "bg-red-500/10",
+        change: "+2%",
+        trend: "up" as const
+      },
+      {
+        title: "Avg Solve Time",
+        value: analyticsData.averageSolveTime,
+        description: "Average time",
+        icon: Clock,
+        color: "text-indigo-600",
+        bgColor: "bg-indigo-500/10",
+        change: "-15m",
+        trend: "down" as const
+      }
+    ],
+    eventStats: [
+      {
+        title: "Total Events",
+        value: analyticsData.totalEvents,
+        description: "All events",
+        icon: Calendar,
+        color: "text-teal-600",
+        bgColor: "bg-teal-500/10",
+        change: "+3",
+        trend: "up" as const
+      },
+      {
+        title: "Active Events",
+        value: analyticsData.activeEvents,
+        description: "Live/upcoming",
+        icon: Calendar,
+        color: "text-yellow-600",
+        bgColor: "bg-yellow-500/10",
+        change: "+1",
+        trend: "up" as const
+      }
+    ]
+  };
 
   const exportAnalytics = () => {
     const csvContent = [
@@ -459,144 +495,334 @@ const PlatformAnalytics = ({ onBack }: PlatformAnalyticsProps) => {
 
   if (loading) {
     return (
-      <Card>
-        <CardContent className="pt-6">
+      <div className="min-h-screen bg-background">
+        <div className="container mx-auto px-4 py-6">
           <div className="text-center py-12">
             <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto"></div>
             <p className="mt-3 text-sm text-muted-foreground">Loading analytics data...</p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <Button variant="ghost" onClick={onBack} className="mb-2 -ml-3">
-            ← Back to Admin
-          </Button>
-          <h1 className="text-2xl font-bold">Platform Analytics</h1>
-          <p className="text-muted-foreground">
-            Real-time insights based on Firestore data
-          </p>
-        </div>
-        
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Time Range:</span>
-            <select 
-              value={timeRange}
-              onChange={(e) => setTimeRange(e.target.value as '7d' | '30d' | '90d' | 'all')}
-              className="p-2 border rounded text-sm bg-background"
-            >
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
-              <option value="90d">Last 90 days</option>
-              <option value="all">All time</option>
-            </select>
-          </div>
-          
-          <Button onClick={exportAnalytics} variant="outline" size="sm">
-            <Download className="w-4 h-4 mr-2" />
-            Export CSV
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto px-4 py-6">
+        {/* Green Back Button */}
+        <div className="mb-6">
+          <Button 
+            variant="outline" 
+            onClick={onBack} 
+            className="mb-4 bg-green-500 hover:bg-green-600 text-white border-green-500 hover:border-green-600"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Admin Dashboard
           </Button>
         </div>
-      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Platform Analytics Dashboard</CardTitle>
-          <CardDescription>
-            Comprehensive overview of platform performance and user engagement
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {/* Stats Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            {stats.map((stat, index) => (
-              <Card key={index}>
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="text-sm font-medium text-muted-foreground">
-                          {stat.title}
-                        </p>
-                        <span className={`text-xs font-medium ${
-                          stat.trend === 'up' ? 'text-green-600' : 'text-red-600'
-                        }`}>
-                          {stat.change}
-                        </span>
-                      </div>
-                      <p className="text-2xl font-bold">{stat.value}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {stat.description}
-                      </p>
+        {/* Main Header */}
+        <div className="mb-8">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+            <div>
+              <h1 className="text-2xl font-bold">Platform Analytics</h1>
+              <p className="text-muted-foreground mt-1">
+                Real-time insights based on Firestore data
+              </p>
+            </div>
+            
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
+              <div className="w-full sm:w-48">
+                <Select value={timeRange} onValueChange={(value: any) => setTimeRange(value)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Time Range" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7d">Last 7 days</SelectItem>
+                    <SelectItem value="30d">Last 30 days</SelectItem>
+                    <SelectItem value="90d">Last 90 days</SelectItem>
+                    <SelectItem value="all">All time</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <Button 
+                onClick={exportAnalytics} 
+                variant="outline" 
+                size="sm"
+                className="w-full sm:w-auto"
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Export CSV
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Key Metrics Header */}
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <BarChart className="w-5 h-5 text-primary" />
+            </div>
+            <h2 className="text-lg font-semibold">Key Metrics</h2>
+          </div>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => setShowAllStats(!showAllStats)}
+            className="text-xs"
+          >
+            {showAllStats ? 'Show Less' : 'Show All'}
+            {showAllStats ? 
+              <ChevronUp className="w-3 h-3 ml-1" /> : 
+              <ChevronDown className="w-3 h-3 ml-1" />
+            }
+          </Button>
+        </div>
+
+        {/* User Stats - Always Visible */}
+        <div className="mb-6">
+          <h3 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
+            <div className="p-1 bg-blue-500/20 rounded">
+              <Users className="w-3 h-3 text-blue-600" />
+            </div>
+            User Statistics
+          </h3>
+          <div className="grid grid-cols-2 gap-4">
+            {groupedStats.userStats.map((stat, index) => (
+              <Card key={index} className="border shadow-sm">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className={`p-2 rounded-lg ${stat.bgColor}`}>
+                      <stat.icon className={`w-4 h-4 ${stat.color}`} />
                     </div>
-                    <div className={`p-3 rounded-full bg-muted ${stat.color}`}>
-                      <stat.icon className="w-6 h-6" />
-                    </div>
+                    <span className={`text-xs font-medium px-2 py-1 rounded-full ${
+                      stat.trend === 'up' ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'
+                    }`}>
+                      {stat.change}
+                    </span>
                   </div>
+                  <p className="text-xl font-bold mb-1">{stat.value}</p>
+                  <p className="text-xs text-muted-foreground truncate">{stat.title}</p>
+                  <p className="text-xs text-muted-foreground mt-1 opacity-80">{stat.description}</p>
                 </CardContent>
               </Card>
             ))}
           </div>
+        </div>
 
-          {/* Additional Analytics Sections */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">User Growth</CardTitle>
-                <CardDescription>Last {timeRange === 'all' ? 'year' : timeRange}</CardDescription>
+        {/* Challenge Stats - Always Visible */}
+        <div className="mb-6">
+          <h3 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
+            <div className="p-1 bg-purple-500/20 rounded">
+              <Shield className="w-3 h-3 text-purple-600" />
+            </div>
+            Challenge Statistics
+          </h3>
+          <div className="grid grid-cols-2 gap-4">
+            {groupedStats.challengeStats.map((stat, index) => (
+              <Card key={index} className="border shadow-sm">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className={`p-2 rounded-lg ${stat.bgColor}`}>
+                      <stat.icon className={`w-4 h-4 ${stat.color}`} />
+                    </div>
+                    <span className={`text-xs font-medium px-2 py-1 rounded-full ${
+                      stat.trend === 'up' ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'
+                    }`}>
+                      {stat.change}
+                    </span>
+                  </div>
+                  <p className="text-xl font-bold mb-1">{stat.value}</p>
+                  <p className="text-xs text-muted-foreground truncate">{stat.title}</p>
+                  <p className="text-xs text-muted-foreground mt-1 opacity-80">{stat.description}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+
+        {/* Additional Stats - Conditionally Visible */}
+        {showAllStats && (
+          <>
+            {/* Performance Stats */}
+            <div className="mb-6">
+              <h3 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
+                <div className="p-1 bg-red-500/20 rounded">
+                  <Target className="w-3 h-3 text-red-600" />
+                </div>
+                Performance Metrics
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                {groupedStats.performanceStats.map((stat, index) => (
+                  <Card key={index} className="border shadow-sm">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className={`p-2 rounded-lg ${stat.bgColor}`}>
+                          <stat.icon className={`w-4 h-4 ${stat.color}`} />
+                        </div>
+                        <span className={`text-xs font-medium px-2 py-1 rounded-full ${
+                          stat.trend === 'up' ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'
+                        }`}>
+                          {stat.change}
+                        </span>
+                      </div>
+                      <p className="text-xl font-bold mb-1">{stat.value}</p>
+                      <p className="text-xs text-muted-foreground truncate">{stat.title}</p>
+                      <p className="text-xs text-muted-foreground mt-1 opacity-80">{stat.description}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+
+            {/* Event Stats */}
+            <div className="mb-6">
+              <h3 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
+                <div className="p-1 bg-teal-500/20 rounded">
+                  <Calendar className="w-3 h-3 text-teal-600" />
+                </div>
+                Event Statistics
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                {groupedStats.eventStats.map((stat, index) => (
+                  <Card key={index} className="border shadow-sm">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className={`p-2 rounded-lg ${stat.bgColor}`}>
+                          <stat.icon className={`w-4 h-4 ${stat.color}`} />
+                        </div>
+                        <span className={`text-xs font-medium px-2 py-1 rounded-full ${
+                          stat.trend === 'up' ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'
+                        }`}>
+                          {stat.change}
+                        </span>
+                      </div>
+                      <p className="text-xl font-bold mb-1">{stat.value}</p>
+                      <p className="text-xs text-muted-foreground truncate">{stat.title}</p>
+                      <p className="text-xs text-muted-foreground mt-1 opacity-80">{stat.description}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Collapsible Analytics Sections */}
+        <div className="space-y-4 mt-8">
+          {/* User Growth Section */}
+          <Card>
+            <button 
+              onClick={() => toggleSection('growth')}
+              className="w-full text-left"
+            >
+              <CardHeader className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-500/10 rounded-lg">
+                      <TrendingUp className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">User Growth</CardTitle>
+                      <CardDescription className="text-xs">
+                        Last {timeRange === 'all' ? 'year' : timeRange}
+                      </CardDescription>
+                    </div>
+                  </div>
+                  {expandedSection === 'growth' ? 
+                    <ChevronUp className="w-4 h-4" /> : 
+                    <ChevronDown className="w-4 h-4" />
+                  }
+                </div>
               </CardHeader>
-              <CardContent>
+            </button>
+            
+            {expandedSection === 'growth' && (
+              <CardContent className="p-4 pt-0">
                 {analyticsData.userGrowthData.length > 0 ? (
                   <div className="space-y-3">
-                    <div className="h-48 flex items-end gap-1 pb-4 border-b">
-                      {analyticsData.userGrowthData.map((item, index) => {
-                        const maxCount = Math.max(...analyticsData.userGrowthData.map(d => d.count));
-                        const height = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
-                        
-                        return (
-                          <div key={index} className="flex-1 flex flex-col items-center">
-                            <div 
-                              className="w-3/4 bg-blue-500 rounded-t transition-all duration-300"
-                              style={{ height: `${height}%` }}
-                            />
-                            <span className="text-xs text-muted-foreground mt-2 text-center">
-                              {item.date}
-                            </span>
-                          </div>
-                        );
-                      })}
+                    <div className="overflow-x-auto pb-2 -mx-2 px-2">
+                      <div className="min-w-[500px]">
+                        <div className="h-32 flex items-end gap-1 pb-4 border-b">
+                          {analyticsData.userGrowthData.map((item, index) => {
+                            const maxCount = Math.max(...analyticsData.userGrowthData.map(d => d.count));
+                            const height = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
+                            
+                            return (
+                              <div key={index} className="flex-1 flex flex-col items-center min-w-[30px]">
+                                <div 
+                                  className="w-3/4 bg-blue-500 rounded-t transition-all duration-300"
+                                  style={{ height: `${height}%` }}
+                                />
+                                <span className="text-xs text-muted-foreground mt-2 text-center whitespace-nowrap">
+                                  {item.date}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-center text-sm text-muted-foreground">
-                      Total users: {analyticsData.totalUsers.toLocaleString()}
+                    <div className="text-center text-sm text-muted-foreground pt-2">
+                      Total users: <span className="font-semibold">{analyticsData.totalUsers.toLocaleString()}</span>
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    No user growth data available for selected period
+                  <div className="text-center py-6 text-muted-foreground">
+                    <BarChart className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No user growth data available</p>
+                    <p className="text-xs">Try selecting a different time range</p>
                   </div>
                 )}
               </CardContent>
-            </Card>
+            )}
+          </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Challenge Performance</CardTitle>
-                <CardDescription>Solve rates by category</CardDescription>
+          {/* Challenge Performance Section */}
+          <Card>
+            <button 
+              onClick={() => toggleSection('performance')}
+              className="w-full text-left"
+            >
+              <CardHeader className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-green-500/10 rounded-lg">
+                      <Award className="w-5 h-5 text-green-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">Challenge Performance</CardTitle>
+                      <CardDescription className="text-xs">
+                        Solve rates by category
+                      </CardDescription>
+                    </div>
+                  </div>
+                  {expandedSection === 'performance' ? 
+                    <ChevronUp className="w-4 h-4" /> : 
+                    <ChevronDown className="w-4 h-4" />
+                  }
+                </div>
               </CardHeader>
-              <CardContent>
+            </button>
+            
+            {expandedSection === 'performance' && (
+              <CardContent className="p-4 pt-0">
                 {analyticsData.challengePerformance.length > 0 ? (
                   <div className="space-y-4">
-                    {analyticsData.challengePerformance.slice(0, 5).map((item, index) => (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Most Popular:</span>
+                      <span className="text-sm font-semibold text-primary">
+                        {analyticsData.popularCategory}
+                      </span>
+                    </div>
+                    
+                    {analyticsData.challengePerformance.slice(0, 4).map((item, index) => (
                       <div key={index} className="space-y-1">
                         <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium">{item.category}</span>
-                          <span className="text-sm">
+                          <span className="text-sm font-medium truncate flex-1">{item.category}</span>
+                          <span className="text-sm font-semibold flex-shrink-0 ml-2">
                             {item.solved}/{item.total} ({item.rate}%)
                           </span>
                         </div>
@@ -608,75 +834,127 @@ const PlatformAnalytics = ({ onBack }: PlatformAnalyticsProps) => {
                         </div>
                       </div>
                     ))}
-                    {analyticsData.challengePerformance.length > 5 && (
-                      <div className="text-center text-sm text-muted-foreground pt-2">
-                        +{analyticsData.challengePerformance.length - 5} more categories
+                    
+                    {analyticsData.challengePerformance.length > 4 && (
+                      <div className="text-center text-sm text-muted-foreground pt-2 border-t">
+                        +{analyticsData.challengePerformance.length - 4} more categories
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    No challenge performance data available
+                  <div className="text-center py-6 text-muted-foreground">
+                    <Shield className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No challenge performance data available</p>
                   </div>
                 )}
               </CardContent>
-            </Card>
-          </div>
-
-          {/* Summary Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Platform Summary</CardTitle>
-              <CardDescription>Key insights and metrics</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">Most Popular Category</p>
-                  <p className="text-lg font-semibold">{analyticsData.popularCategory}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">Submission Success Rate</p>
-                  <p className="text-lg font-semibold">
-                    {analyticsData.totalSubmissions > 0 ? 
-                      `${Math.round((analyticsData.successfulSubmissions / analyticsData.totalSubmissions) * 100)}%` : 
-                      "0%"}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">Challenges per User</p>
-                  <p className="text-lg font-semibold">
-                    {analyticsData.totalUsers > 0 ? 
-                      (analyticsData.totalChallenges / analyticsData.totalUsers).toFixed(1) : 
-                      "0"}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">Solves per Challenge</p>
-                  <p className="text-lg font-semibold">
-                    {analyticsData.totalChallenges > 0 ? 
-                      (analyticsData.solvedChallenges / analyticsData.totalChallenges).toFixed(1) : 
-                      "0"}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
+            )}
           </Card>
 
-          <div className="flex gap-2 mt-6">
-            <Button variant="outline" onClick={onBack}>
+          {/* Platform Summary Section */}
+          <Card>
+            <button 
+              onClick={() => toggleSection('summary')}
+              className="w-full text-left"
+            >
+              <CardHeader className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-yellow-500/10 rounded-lg">
+                      <Zap className="w-5 h-5 text-yellow-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">Platform Summary</CardTitle>
+                      <CardDescription className="text-xs">
+                        Key insights and metrics
+                      </CardDescription>
+                    </div>
+                  </div>
+                  {expandedSection === 'summary' ? 
+                    <ChevronUp className="w-4 h-4" /> : 
+                    <ChevronDown className="w-4 h-4" />
+                  }
+                </div>
+              </CardHeader>
+            </button>
+            
+            {expandedSection === 'summary' && (
+              <CardContent className="p-4 pt-0">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1 p-3 bg-blue-500/5 rounded-lg border">
+                    <p className="text-xs text-muted-foreground">Most Popular Category</p>
+                    <p className="text-sm font-semibold truncate">{analyticsData.popularCategory}</p>
+                  </div>
+                  <div className="space-y-1 p-3 bg-green-500/5 rounded-lg border">
+                    <p className="text-xs text-muted-foreground">Success Rate</p>
+                    <p className="text-sm font-semibold">
+                      {analyticsData.totalSubmissions > 0 ? 
+                        `${Math.round((analyticsData.successfulSubmissions / analyticsData.totalSubmissions) * 100)}%` : 
+                        "0%"}
+                    </p>
+                  </div>
+                  <div className="space-y-1 p-3 bg-purple-500/5 rounded-lg border">
+                    <p className="text-xs text-muted-foreground">Challenges per User</p>
+                    <p className="text-sm font-semibold">
+                      {analyticsData.totalUsers > 0 ? 
+                        (analyticsData.totalChallenges / analyticsData.totalUsers).toFixed(1) : 
+                        "0"}
+                    </p>
+                  </div>
+                  <div className="space-y-1 p-3 bg-orange-500/5 rounded-lg border">
+                    <p className="text-xs text-muted-foreground">Solves per Challenge</p>
+                    <p className="text-sm font-semibold">
+                      {analyticsData.totalChallenges > 0 ? 
+                        (analyticsData.solvedChallenges / analyticsData.totalChallenges).toFixed(1) : 
+                        "0"}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="mt-8 space-y-3">
+          <Button 
+            onClick={fetchAnalyticsData} 
+            variant="outline" 
+            className="w-full"
+          >
+            Refresh Analytics Data
+          </Button>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Button 
+              onClick={onBack} 
+              variant="outline" 
+              className="w-full"
+            >
               Back to Dashboard
             </Button>
-            <Button onClick={fetchAnalyticsData} variant="secondary">
-              Refresh Data
-            </Button>
-            <Button onClick={exportAnalytics}>
+            <Button 
+              onClick={exportAnalytics} 
+              className="w-full bg-green-500 hover:bg-green-600"
+            >
               <Download className="w-4 h-4 mr-2" />
               Export Full Report
             </Button>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-8 pt-4 border-t text-center text-xs text-muted-foreground">
+          <div className="flex items-center justify-center gap-2 mb-1">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <p>Last updated: {new Date().toLocaleTimeString([], { 
+              hour: '2-digit', 
+              minute: '2-digit'
+            })}</p>
+          </div>
+          <p>Data updates in real-time from Firestore</p>
+        </div>
+      </div>
     </div>
   );
 };
