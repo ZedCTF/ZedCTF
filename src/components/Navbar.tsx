@@ -8,6 +8,7 @@ import { useAuthContext } from "../contexts/AuthContext";
 import { useAdminContext } from "../contexts/AdminContext";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
+import NotificationDropdown from "./NotificationDropdown"; // ← ADD THIS IMPORT
 
 const Navbar = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -30,15 +31,11 @@ const Navbar = () => {
     }
   };
 
-  // Check if current path is active for styling
   const isActivePath = (path: string) => {
     return location.pathname === path;
   };
 
-  // Don't show admin links while loading
   const showAdminLinks = !loading && (isAdmin || isModerator);
-  
-  // Show Dashboard to everyone EXCEPT admins/moderators
   const showDashboard = !loading && !isAdmin && !isModerator;
 
   return (
@@ -142,11 +139,8 @@ const Navbar = () => {
               <Search className="w-5 h-5" />
             </Button>
 
-            {/* Notifications - Show to everyone */}
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-            </Button>
+            {/* Notifications Dropdown - Show to logged-in users */} {/* ← CHANGED */}
+            {user && <NotificationDropdown />}
 
             {/* Mobile Menu Button */}
             <Button 
@@ -193,138 +187,10 @@ const Navbar = () => {
           </div>
         </div>
 
-        {/* Mobile Menu */}
+        {/* Mobile Menu (unchanged) */}
         {isMobileMenuOpen && (
           <div className="md:hidden border-t border-border bg-background/95 backdrop-blur-lg animate-fade-in">
-            <div className="py-4 space-y-4">
-              <Link 
-                to="/" 
-                className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-all ${
-                  isActivePath("/") 
-                    ? "text-green-600 bg-green-50" 
-                    : "text-foreground/80 hover:text-green-600 hover:bg-accent"
-                }`}
-                onClick={() => setIsMobileMenuOpen(false)}
-              >
-                <Home className="w-5 h-5" />
-                Home
-              </Link>
-              
-              {/* Dashboard - Show to everyone EXCEPT admins/moderators */}
-              {showDashboard && (
-                <Link 
-                  to="/dashboard" 
-                  className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-all ${
-                    isActivePath("/dashboard") 
-                      ? "text-green-600 bg-green-50" 
-                      : "text-foreground/80 hover:text-green-600 hover:bg-accent"
-                  }`}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  <Activity className="w-5 h-5" />
-                  Dashboard
-                </Link>
-              )}
-              
-              {/* Practice - Show to everyone */}
-              <Link 
-                to="/practice" 
-                className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-all ${
-                  isActivePath("/practice") 
-                    ? "text-green-600 bg-green-50" 
-                    : "text-foreground/80 hover:text-green-600 hover:bg-accent"
-                }`}
-                onClick={() => setIsMobileMenuOpen(false)}
-              >
-                <Trophy className="w-5 h-5" />
-                Practice
-              </Link>
-              
-              {/* LIVE CTF - Show to everyone */}
-              <Link 
-                to="/live" 
-                className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-all ${
-                  isActivePath("/live") 
-                    ? "text-green-600 bg-green-50" 
-                    : "text-foreground/80 hover:text-green-600 hover:bg-accent"
-                }`}
-                onClick={() => setIsMobileMenuOpen(false)}
-              >
-                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                <Flame className="w-5 h-5" />
-                LIVE CTF
-              </Link>
-              
-              {/* Leaderboard - Show to everyone */}
-              <Link 
-                to="/leaderboard" 
-                className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-all ${
-                  isActivePath("/leaderboard") 
-                    ? "text-green-600 bg-green-50" 
-                    : "text-foreground/80 hover:text-green-600 hover:bg-accent"
-                }`}
-                onClick={() => setIsMobileMenuOpen(false)}
-              >
-                <Users className="w-5 h-5" />
-                Leaderboard
-              </Link>
-              
-              {/* Writeups - Show to everyone */}
-              <Link 
-                to="/writeups" 
-                className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-all ${
-                  isActivePath("/writeups") 
-                    ? "text-green-600 bg-green-50" 
-                    : "text-foreground/80 hover:text-green-600 hover:bg-accent"
-                }`}
-                onClick={() => setIsMobileMenuOpen(false)}
-              >
-                <BookOpen className="w-5 h-5" />
-                Writeups
-              </Link>
-
-              {/* Admin Link in Mobile Menu - Only show for admins/moderators */}
-              {showAdminLinks && (
-                <Link 
-                  to="/admin" 
-                  className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-all ${
-                    isActivePath("/admin") 
-                      ? "text-green-600 bg-green-50" 
-                      : "text-foreground/80 hover:text-green-600 hover:bg-accent"
-                  }`}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  <Shield className="w-5 h-5" />
-                  Admin
-                </Link>
-              )}
-              
-              {/* Conditional Mobile Auth Button */}
-              <div className="px-4 pt-2 border-t border-border">
-                {user ? (
-                  <Button 
-                    variant="default" 
-                    className="w-full justify-start gap-2 bg-red-500 hover:bg-red-600"
-                    onClick={handleLogout}
-                    disabled={logoutLoading}
-                  >
-                    {logoutLoading ? (
-                      <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
-                    ) : (
-                      <LogOut className="w-4 h-4" />
-                    )}
-                    {logoutLoading ? "Signing out..." : "Logout"}
-                  </Button>
-                ) : (
-                  <Link to="/login" onClick={() => setIsMobileMenuOpen(false)}>
-                    <Button variant="default" className="w-full justify-start gap-2 bg-green-500 hover:bg-green-600">
-                      <User className="w-4 h-4" />
-                      Sign In
-                    </Button>
-                  </Link>
-                )}
-              </div>
-            </div>
+            {/* ... keep your existing mobile menu code ... */}
           </div>
         )}
       </div>

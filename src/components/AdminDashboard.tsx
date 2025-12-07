@@ -14,7 +14,8 @@ import {
   List,
   Edit3,
   RefreshCw,
-  UserCheck // NEW ICON
+  UserCheck,
+  Bell, // ADDED FOR NOTIFICATIONS
 } from "lucide-react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
@@ -34,7 +35,8 @@ import PlatformAnalytics from "./admin/PlatformAnalytics";
 import SystemSettings from "./admin/SystemSettings";
 import AddChallenges from "./admin/AddChallenges";
 import LeaderboardRecalc from "./admin/LeaderboardRecalc";
-import UsernameSync from "./admin/UsernameSync"; // NEW IMPORT
+import UsernameSync from "./admin/UsernameSync";
+import AdminNotifications from "./admin/AdminNotifications";
 
 interface Stats {
   totalUsers: number;
@@ -47,7 +49,7 @@ interface Stats {
 }
 
 const AdminDashboard = () => {
-  const { isAdmin, isModerator } = useAdminContext();
+  const { isAdmin, isModerator, permissions, loading: adminLoading } = useAdminContext();
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState("overview");
   const [selectedChallenge, setSelectedChallenge] = useState<any>(null);
@@ -145,6 +147,14 @@ const AdminDashboard = () => {
 
   // Redirect if not admin/moderator
   if (!isAdmin && !isModerator) {
+    if (adminLoading) {
+      return (
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full"></div>
+        </div>
+      );
+    }
+    
     return (
       <>
         <Navbar />
@@ -241,7 +251,7 @@ const AdminDashboard = () => {
         return (
           <EventScheduling 
             onBack={() => setActiveView("overview")} 
-            userRole={isAdmin ? "admin" : "user"}
+            userRole={isAdmin ? "admin" : "moderator"}
             onEventCreated={handleEventCreated}
           />
         );
@@ -253,8 +263,10 @@ const AdminDashboard = () => {
         return isAdmin ? <SystemSettings onBack={() => setActiveView("overview")} /> : renderAccessDenied();
       case "leaderboard-recalc":
         return isAdmin ? <LeaderboardRecalc onBack={() => setActiveView("overview")} /> : renderAccessDenied();
-      case "username-sync": // NEW CASE
+      case "username-sync":
         return isAdmin ? <UsernameSync onBack={() => setActiveView("overview")} /> : renderAccessDenied();
+      case "admin-notifications":
+        return (isAdmin || isModerator) ? <AdminNotifications onBack={() => setActiveView("overview")} /> : renderAccessDenied();
       default:
         return renderOverview();
     }
@@ -381,8 +393,8 @@ const AdminDashboard = () => {
 
         <Card>
           <CardHeader>
-            <CardTitle>User Management</CardTitle>
-            <CardDescription>Manage users and permissions</CardDescription>
+            <CardTitle>User & System Management</CardTitle>
+            <CardDescription>Manage users, communications, and system settings</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {isAdmin && (
@@ -394,50 +406,62 @@ const AdminDashboard = () => {
                 View All Users
               </Button>
             )}
-            {isAdmin && (
+            
+            {(isAdmin || isModerator) && (
               <Button 
                 variant="outline" 
-                className="w-full justify-start gap-2"
-                onClick={() => setActiveView("username-sync")} // NEW BUTTON
+                className="w-full justify-start gap-2 bg-blue-50 hover:bg-blue-100 border-blue-200"
+                onClick={() => setActiveView("admin-notifications")}
               >
-                <UserCheck className="w-4 h-4" /> {/* NEW ICON */}
-                Sync Usernames
+                <Bell className="w-4 h-4 text-blue-600" />
+                Send Announcements
               </Button>
             )}
+            
             {isAdmin && (
-              <Button 
-                variant="outline" 
-                className="w-full justify-start gap-2"
-                onClick={() => setActiveView("leaderboard-recalc")}
-              >
-                <RefreshCw className="w-4 h-4" />
-                Recalculate Leaderboard
-              </Button>
+              <>
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-start gap-2"
+                  onClick={() => setActiveView("username-sync")}
+                >
+                  <UserCheck className="w-4 h-4" />
+                  Sync Usernames
+                </Button>
+                
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-start gap-2"
+                  onClick={() => setActiveView("leaderboard-recalc")}
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Recalculate Leaderboard
+                </Button>
+                
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-start gap-2"
+                  onClick={() => setActiveView("analytics")}
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  Platform Analytics
+                </Button>
+                
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-start gap-2"
+                  onClick={() => setActiveView("settings")}
+                >
+                  <Settings className="w-4 h-4" />
+                  System Settings
+                </Button>
+              </>
             )}
-            {isAdmin && (
-              <Button 
-                variant="outline" 
-                className="w-full justify-start gap-2"
-                onClick={() => setActiveView("analytics")}
-              >
-                <BarChart3 className="w-4 h-4" />
-                Platform Analytics
-              </Button>
-            )}
-            {isAdmin && (
-              <Button 
-                variant="outline" 
-                className="w-full justify-start gap-2"
-                onClick={() => setActiveView("settings")}
-              >
-                <Settings className="w-4 h-4" />
-                System Settings
-              </Button>
-            )}
-            {!isAdmin && (
+            
+            {!isAdmin && isModerator && (
               <div className="text-center py-4">
                 <p className="text-sm text-muted-foreground">
-                  User management features are only available to administrators.
+                  Additional administrative features are only available to full administrators.
                 </p>
               </div>
             )}
@@ -469,7 +493,8 @@ const AdminDashboard = () => {
                    activeView === "analytics" ? "Platform Analytics" :
                    activeView === "settings" ? "System Settings" :
                    activeView === "leaderboard-recalc" ? "Leaderboard Recalculation" :
-                   activeView === "username-sync" ? "Username Synchronization" : // NEW TITLE
+                   activeView === "username-sync" ? "Username Synchronization" :
+                   activeView === "admin-notifications" ? "Send Announcements" :
                    "Admin Dashboard"}
                 </h1>
                 <p className="text-muted-foreground">
@@ -483,8 +508,10 @@ const AdminDashboard = () => {
                     ? "Add challenges to your event"
                     : activeView === "leaderboard-recalc"
                     ? "Fix missing points and update leaderboard rankings"
-                    : activeView === "username-sync" // NEW DESCRIPTION
+                    : activeView === "username-sync"
                     ? "Fix username inconsistencies between users and usernames collections"
+                    : activeView === "admin-notifications"
+                    ? "Send announcements to all users via email or in-app notifications"
                     : isAdmin ? "Admin management panel" : "Moderator management panel"
                   }
                 </p>
@@ -494,18 +521,33 @@ const AdminDashboard = () => {
                 <Button 
                   variant="outline" 
                   onClick={() => {
-                    if (activeView === "create-challenge" || activeView === "edit-challenge") {
-                      setActiveView("challenge-management");
-                    } else if (activeView === "challenge-management" || activeView === "event-management" || activeView === "add-challenges") {
-                      setActiveView("overview");
-                    } else if (activeView === "username-sync") { // NEW CASE
-                      setActiveView("overview");
-                    } else {
-                      setActiveView("overview");
+                    // Handle back navigation for each view
+                    switch (activeView) {
+                      case "create-challenge":
+                      case "edit-challenge":
+                        setActiveView("challenge-management");
+                        break;
+                      case "challenge-management":
+                      case "event-management":
+                      case "add-challenges":
+                      case "admin-notifications":
+                      case "username-sync":
+                      case "leaderboard-recalc":
+                      case "analytics":
+                      case "settings":
+                      case "review-writeups":
+                      case "users":
+                        setActiveView("overview");
+                        break;
+                      default:
+                        setActiveView("overview");
                     }
                     // Clear context when going back to overview
                     if (activeView === "add-challenges" || activeView === "create-challenge") {
                       setSelectedEvent(null);
+                    }
+                    if (activeView === "edit-challenge") {
+                      setSelectedChallenge(null);
                     }
                   }}
                 >
@@ -513,7 +555,7 @@ const AdminDashboard = () => {
                     ? "Back to Challenges" 
                     : activeView === "challenge-management" || activeView === "event-management" || activeView === "add-challenges"
                     ? "Back to Dashboard"
-                    : activeView === "username-sync" // NEW TEXT
+                    : activeView === "admin-notifications"
                     ? "Back to Dashboard"
                     : "Back to Dashboard"
                   }
@@ -525,6 +567,14 @@ const AdminDashboard = () => {
               <div className={`px-2 py-1 rounded text-xs font-medium ${isAdmin ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
                 {isAdmin ? 'Administrator' : 'Moderator'}
               </div>
+              {(isAdmin || isModerator) && activeView === "admin-notifications" && (
+                <div className="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                  <span className="flex items-center gap-1">
+                    <Bell className="w-3 h-3" />
+                    Announcements
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 

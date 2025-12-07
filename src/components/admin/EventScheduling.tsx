@@ -14,7 +14,7 @@ import { doc, collection, setDoc } from "firebase/firestore";
 
 interface EventSchedulingProps {
   onBack: () => void;
-  userRole: "admin" | "user";
+  userRole: "admin" | "user"|'moderator';
   onEventCreated: (eventId: string, eventData: any) => void;
 }
 
