@@ -781,7 +781,7 @@ const NotificationDropdown = () => {
             {loading ? (
               <div className="py-8 text-center">
                 <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full mx-auto"></div>
-                <p className="mt-2 text-sm text-muted-foreground">Loading notifications...</p>
+                <p className="mt-2 text-sm text-muted-foreground">Loading notifications....</p>
               </div>
             ) : dropdownFilteredNotifications.length === 0 ? (
               <div className="py-8 text-center">

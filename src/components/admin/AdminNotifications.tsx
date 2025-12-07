@@ -514,7 +514,7 @@ const AdminNotifications: React.FC<AdminNotificationsProps> = ({ onBack }) => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="message">Message *</Label>
+                  <Label htmlFor="message"> Message </Label>
                   <Textarea
                     id="message"
                     placeholder="Enter your announcement message..."

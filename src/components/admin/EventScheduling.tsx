@@ -455,7 +455,7 @@ const EventScheduling = ({ onBack, userRole, onEventCreated }: EventSchedulingPr
                         Hosting Fee: {formData.hostingFee} ZMW
                       </p>
                       <p className="text-xs">
-                        You'll pay this fee to the admin via Mobile Money (Flutterwave) to host your event
+                        You'll pay this fee to the admin via Mobile Money (Flutterwave) to host your event.
                       </p>
                     </div>
                   </div>

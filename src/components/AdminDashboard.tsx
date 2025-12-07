@@ -1,4 +1,4 @@
-// src/components/AdminDashboard.tsx
+// src/components/AdminDashboard.tsx - FULLY RESPONSIVE
 import { useState, useEffect } from "react";
 import { useAdminContext } from "../contexts/AdminContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +15,11 @@ import {
   Edit3,
   RefreshCw,
   UserCheck,
-  Bell, // ADDED FOR NOTIFICATIONS
+  Bell,
+  ChevronLeft,
+  Menu,
+  Home,
+  AlertCircle
 } from "lucide-react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
@@ -64,6 +68,7 @@ const AdminDashboard = () => {
     totalWriteups: 0
   });
   const [loading, setLoading] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Fetch real stats from Firestore
   const fetchStats = async () => {
@@ -285,52 +290,52 @@ const AdminDashboard = () => {
 
   const renderOverview = () => (
     <>
-      {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Total Users</CardTitle>
-            <Users className="w-4 h-4 text-muted-foreground" />
+      {/* Quick Stats - Responsive Grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6 mb-6 sm:mb-8">
+        <Card className="col-span-2 lg:col-span-1">
+          <CardHeader className="flex flex-row items-center justify-between p-3 sm:p-4 pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium">Total Users</CardTitle>
+            <Users className="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.totalUsers}</div>
+          <CardContent className="p-3 sm:p-4 pt-0">
+            <div className="text-xl sm:text-2xl font-bold">{stats.totalUsers}</div>
             <p className="text-xs text-muted-foreground">Registered users</p>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Active Challenges</CardTitle>
-            <Shield className="w-4 h-4 text-muted-foreground" />
+        <Card className="col-span-2 lg:col-span-1">
+          <CardHeader className="flex flex-row items-center justify-between p-3 sm:p-4 pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium">Active Challenges</CardTitle>
+            <Shield className="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.activeChallenges}</div>
+          <CardContent className="p-3 sm:p-4 pt-0">
+            <div className="text-xl sm:text-2xl font-bold">{stats.activeChallenges}</div>
             <p className="text-xs text-muted-foreground">
               {stats.totalChallenges > 0 ? `of ${stats.totalChallenges} total` : 'No challenges yet'}
             </p>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Live Events</CardTitle>
-            <Calendar className="w-4 h-4 text-muted-foreground" />
+        <Card className="col-span-2 lg:col-span-1">
+          <CardHeader className="flex flex-row items-center justify-between p-3 sm:p-4 pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium">Live Events</CardTitle>
+            <Calendar className="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.liveEvents}</div>
+          <CardContent className="p-3 sm:p-4 pt-0">
+            <div className="text-xl sm:text-2xl font-bold">{stats.liveEvents}</div>
             <p className="text-xs text-muted-foreground">
               {stats.totalEvents > 0 ? `of ${stats.totalEvents} total` : 'No events yet'}
             </p>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Pending Write-ups</CardTitle>
-            <FileText className="w-4 h-4 text-muted-foreground" />
+        <Card className="col-span-2 lg:col-span-1">
+          <CardHeader className="flex flex-row items-center justify-between p-3 sm:p-4 pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium">Pending Write-ups</CardTitle>
+            <FileText className="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.pendingWriteups}</div>
+          <CardContent className="p-3 sm:p-4 pt-0">
+            <div className="text-xl sm:text-2xl font-bold">{stats.pendingWriteups}</div>
             <p className="text-xs text-muted-foreground">
               {stats.totalWriteups > 0 ? `of ${stats.totalWriteups} total` : 'No write-ups yet'}
             </p>
@@ -338,16 +343,16 @@ const AdminDashboard = () => {
         </Card>
       </div>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Quick Actions - Responsive Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         <Card>
-          <CardHeader>
-            <CardTitle>Content Management</CardTitle>
-            <CardDescription>Create and manage platform content</CardDescription>
+          <CardHeader className="p-4 sm:p-6">
+            <CardTitle className="text-base sm:text-lg">Content Management</CardTitle>
+            <CardDescription className="text-xs sm:text-sm">Create and manage platform content</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="p-4 sm:p-6 pt-0 space-y-3">
             <Button 
-              className="w-full justify-start gap-2"
+              className="w-full justify-start gap-2 text-sm sm:text-base"
               onClick={() => {
                 setSelectedEvent(null); // Clear any event context
                 setActiveView("create-challenge");
@@ -357,14 +362,14 @@ const AdminDashboard = () => {
               Create New Challenge
             </Button>
             <Button 
-              className="w-full justify-start gap-2"
+              className="w-full justify-start gap-2 text-sm sm:text-base"
               onClick={() => setActiveView("challenge-management")}
             >
               <List className="w-4 h-4" />
               Manage Challenges
             </Button>
             <Button 
-              className="w-full justify-start gap-2"
+              className="w-full justify-start gap-2 text-sm sm:text-base"
               onClick={() => setActiveView("schedule-event")}
             >
               <Plus className="w-4 h-4" />
@@ -372,7 +377,7 @@ const AdminDashboard = () => {
             </Button>
             <Button 
               variant="outline" 
-              className="w-full justify-start gap-2"
+              className="w-full justify-start gap-2 text-sm sm:text-base"
               onClick={() => setActiveView("event-management")}
             >
               <Edit3 className="w-4 h-4" />
@@ -381,7 +386,7 @@ const AdminDashboard = () => {
             {isAdmin && (
               <Button 
                 variant="outline" 
-                className="w-full justify-start gap-2"
+                className="w-full justify-start gap-2 text-sm sm:text-base"
                 onClick={() => setActiveView("review-writeups")}
               >
                 <FileText className="w-4 h-4" />
@@ -392,14 +397,14 @@ const AdminDashboard = () => {
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle>User & System Management</CardTitle>
-            <CardDescription>Manage users, communications, and system settings</CardDescription>
+          <CardHeader className="p-4 sm:p-6">
+            <CardTitle className="text-base sm:text-lg">User & System Management</CardTitle>
+            <CardDescription className="text-xs sm:text-sm">Manage users, communications, and system settings</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="p-4 sm:p-6 pt-0 space-y-3">
             {isAdmin && (
               <Button 
-                className="w-full justify-start gap-2"
+                className="w-full justify-start gap-2 text-sm sm:text-base"
                 onClick={() => setActiveView("users")}
               >
                 <Users className="w-4 h-4" />
@@ -410,7 +415,7 @@ const AdminDashboard = () => {
             {(isAdmin || isModerator) && (
               <Button 
                 variant="outline" 
-                className="w-full justify-start gap-2 bg-blue-50 hover:bg-blue-100 border-blue-200"
+                className="w-full justify-start gap-2 text-sm sm:text-base bg-blue-50 hover:bg-blue-100 border-blue-200"
                 onClick={() => setActiveView("admin-notifications")}
               >
                 <Bell className="w-4 h-4 text-blue-600" />
@@ -422,7 +427,7 @@ const AdminDashboard = () => {
               <>
                 <Button 
                   variant="outline" 
-                  className="w-full justify-start gap-2"
+                  className="w-full justify-start gap-2 text-sm sm:text-base"
                   onClick={() => setActiveView("username-sync")}
                 >
                   <UserCheck className="w-4 h-4" />
@@ -431,7 +436,7 @@ const AdminDashboard = () => {
                 
                 <Button 
                   variant="outline" 
-                  className="w-full justify-start gap-2"
+                  className="w-full justify-start gap-2 text-sm sm:text-base"
                   onClick={() => setActiveView("leaderboard-recalc")}
                 >
                   <RefreshCw className="w-4 h-4" />
@@ -440,7 +445,7 @@ const AdminDashboard = () => {
                 
                 <Button 
                   variant="outline" 
-                  className="w-full justify-start gap-2"
+                  className="w-full justify-start gap-2 text-sm sm:text-base"
                   onClick={() => setActiveView("analytics")}
                 >
                   <BarChart3 className="w-4 h-4" />
@@ -449,7 +454,7 @@ const AdminDashboard = () => {
                 
                 <Button 
                   variant="outline" 
-                  className="w-full justify-start gap-2"
+                  className="w-full justify-start gap-2 text-sm sm:text-base"
                   onClick={() => setActiveView("settings")}
                 >
                   <Settings className="w-4 h-4" />
@@ -459,8 +464,8 @@ const AdminDashboard = () => {
             )}
             
             {!isAdmin && isModerator && (
-              <div className="text-center py-4">
-                <p className="text-sm text-muted-foreground">
+              <div className="text-center py-2 sm:py-4">
+                <p className="text-xs sm:text-sm text-muted-foreground">
                   Additional administrative features are only available to full administrators.
                 </p>
               </div>
@@ -471,99 +476,143 @@ const AdminDashboard = () => {
     </>
   );
 
+  // Get view title for current active view
+  const getViewTitle = () => {
+    const titles: {[key: string]: {title: string, description: string}} = {
+      "overview": { 
+        title: "Admin Dashboard", 
+        description: `Manage your CTF platform${isAdmin ? ', users, challenges, and events' : ' challenges and events'}`
+      },
+      "users": { 
+        title: "User Management", 
+        description: "View and manage all registered users"
+      },
+      "event-management": { 
+        title: "Event Management", 
+        description: "View and manage all your created events"
+      },
+      "challenge-management": { 
+        title: "Challenge Management", 
+        description: "Create new challenges or add existing ones to your events"
+      },
+      "add-challenges": { 
+        title: "Add Challenges to Event", 
+        description: "Add challenges to your event"
+      },
+      "create-challenge": { 
+        title: "Create Challenge", 
+        description: "Create a new challenge for your CTF platform"
+      },
+      "edit-challenge": { 
+        title: "Edit Challenge", 
+        description: "Edit an existing challenge"
+      },
+      "schedule-event": { 
+        title: "Schedule Event", 
+        description: "Create a new CTF event"
+      },
+      "review-writeups": { 
+        title: "Review Write-ups", 
+        description: "Review and approve user write-ups"
+      },
+      "analytics": { 
+        title: "Platform Analytics", 
+        description: "View platform usage statistics and insights"
+      },
+      "settings": { 
+        title: "System Settings", 
+        description: "Configure platform settings"
+      },
+      "leaderboard-recalc": { 
+        title: "Leaderboard Recalculation", 
+        description: "Fix missing points and update leaderboard rankings"
+      },
+      "username-sync": { 
+        title: "Username Synchronization", 
+        description: "Fix username inconsistencies between users and usernames collections"
+      },
+      "admin-notifications": { 
+        title: "Send Announcements", 
+        description: "Send announcements to all users via email or in-app notifications"
+      }
+    };
+    
+    return titles[activeView] || { title: "Admin Dashboard", description: "Admin management panel" };
+  };
+
+  // Handle back navigation
+  const handleBack = () => {
+    switch (activeView) {
+      case "create-challenge":
+      case "edit-challenge":
+        setActiveView("challenge-management");
+        break;
+      case "challenge-management":
+      case "event-management":
+      case "add-challenges":
+      case "admin-notifications":
+      case "username-sync":
+      case "leaderboard-recalc":
+      case "analytics":
+      case "settings":
+      case "review-writeups":
+      case "users":
+        setActiveView("overview");
+        break;
+      default:
+        setActiveView("overview");
+    }
+    // Clear context when going back to overview
+    if (activeView === "add-challenges" || activeView === "create-challenge") {
+      setSelectedEvent(null);
+    }
+    if (activeView === "edit-challenge") {
+      setSelectedChallenge(null);
+    }
+  };
+
+  const { title, description } = getViewTitle();
+
   return (
     <>
       <Navbar />
-      <section className="pt-24 pb-16 min-h-screen bg-background">
-        <div className="container px-4 mx-auto">
-          {/* Header */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-4xl font-bold mb-2">
-                  {activeView === "overview" ? "Admin Dashboard" : 
-                   activeView === "users" ? "User Management" :
-                   activeView === "event-management" ? "Event Management" :
-                   activeView === "challenge-management" ? "Challenge Management" :
-                   activeView === "add-challenges" ? "Add Challenges to Event" :
-                   activeView === "create-challenge" ? "Create Challenge" :
-                   activeView === "edit-challenge" ? "Edit Challenge" :
-                   activeView === "schedule-event" ? "Schedule Event" :
-                   activeView === "review-writeups" ? "Review Write-ups" :
-                   activeView === "analytics" ? "Platform Analytics" :
-                   activeView === "settings" ? "System Settings" :
-                   activeView === "leaderboard-recalc" ? "Leaderboard Recalculation" :
-                   activeView === "username-sync" ? "Username Synchronization" :
-                   activeView === "admin-notifications" ? "Send Announcements" :
-                   "Admin Dashboard"}
-                </h1>
-                <p className="text-muted-foreground">
-                  {activeView === "overview" 
-                    ? `Manage your CTF platform${isAdmin ? ', users, challenges, and events' : ' challenges and events'}`
-                    : activeView === "event-management"
-                    ? "View and manage all your created events"
-                    : activeView === "challenge-management"
-                    ? "Create new challenges or add existing ones to your events"
-                    : activeView === "add-challenges"
-                    ? "Add challenges to your event"
-                    : activeView === "leaderboard-recalc"
-                    ? "Fix missing points and update leaderboard rankings"
-                    : activeView === "username-sync"
-                    ? "Fix username inconsistencies between users and usernames collections"
-                    : activeView === "admin-notifications"
-                    ? "Send announcements to all users via email or in-app notifications"
-                    : isAdmin ? "Admin management panel" : "Moderator management panel"
-                  }
-                </p>
+      <section className="pt-20 sm:pt-24 pb-12 sm:pb-16 min-h-screen bg-background">
+        <div className="container px-3 sm:px-4 mx-auto">
+          {/* MOBILE HEADER */}
+          <div className="sm:hidden mb-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                {activeView !== "overview" && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleBack}
+                    className="h-8 w-8"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                )}
+                <div>
+                  <h1 className="text-lg font-bold">{title}</h1>
+                  <p className="text-xs text-muted-foreground">
+                    {activeView === "overview" ? `${isAdmin ? 'Administrator' : 'Moderator'} Panel` : description}
+                  </p>
+                </div>
               </div>
               
-              {activeView !== "overview" && (
-                <Button 
-                  variant="outline" 
-                  onClick={() => {
-                    // Handle back navigation for each view
-                    switch (activeView) {
-                      case "create-challenge":
-                      case "edit-challenge":
-                        setActiveView("challenge-management");
-                        break;
-                      case "challenge-management":
-                      case "event-management":
-                      case "add-challenges":
-                      case "admin-notifications":
-                      case "username-sync":
-                      case "leaderboard-recalc":
-                      case "analytics":
-                      case "settings":
-                      case "review-writeups":
-                      case "users":
-                        setActiveView("overview");
-                        break;
-                      default:
-                        setActiveView("overview");
-                    }
-                    // Clear context when going back to overview
-                    if (activeView === "add-challenges" || activeView === "create-challenge") {
-                      setSelectedEvent(null);
-                    }
-                    if (activeView === "edit-challenge") {
-                      setSelectedChallenge(null);
-                    }
-                  }}
-                >
-                  {activeView === "create-challenge" || activeView === "edit-challenge" 
-                    ? "Back to Challenges" 
-                    : activeView === "challenge-management" || activeView === "event-management" || activeView === "add-challenges"
-                    ? "Back to Dashboard"
-                    : activeView === "admin-notifications"
-                    ? "Back to Dashboard"
-                    : "Back to Dashboard"
-                  }
-                </Button>
-              )}
+              {/* Mobile Stats Toggle */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className="h-8 px-2"
+              >
+                <Menu className="h-4 w-4" />
+              </Button>
             </div>
             
-            <div className="flex items-center gap-2 mt-2">
+            {/* Mobile Role Badge */}
+            <div className="flex items-center gap-2">
               <div className={`px-2 py-1 rounded text-xs font-medium ${isAdmin ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
                 {isAdmin ? 'Administrator' : 'Moderator'}
               </div>
@@ -578,7 +627,178 @@ const AdminDashboard = () => {
             </div>
           </div>
 
-          {renderActiveView()}
+          {/* DESKTOP HEADER */}
+          <div className="hidden sm:block mb-6 sm:mb-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-2">
+                  {title}
+                </h1>
+                <p className="text-sm sm:text-base text-muted-foreground">
+                  {description}
+                </p>
+                
+                <div className="flex items-center gap-2 mt-2">
+                  <div className={`px-2 py-1 rounded text-xs font-medium ${isAdmin ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
+                    {isAdmin ? 'Administrator' : 'Moderator'}
+                  </div>
+                  {(isAdmin || isModerator) && activeView === "admin-notifications" && (
+                    <div className="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                      <span className="flex items-center gap-1">
+                        <Bell className="w-3 h-3" />
+                        Announcements
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* Desktop Back/Home Button */}
+              {activeView !== "overview" ? (
+                <Button 
+                  variant="outline" 
+                  onClick={handleBack}
+                  className="gap-2 hidden sm:flex"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  {activeView === "create-challenge" || activeView === "edit-challenge" 
+                    ? "Back to Challenges" 
+                    : activeView === "challenge-management" || activeView === "event-management" || activeView === "add-challenges"
+                    ? "Back to Dashboard"
+                    : "Back to Dashboard"
+                  }
+                </Button>
+              ) : (
+                <Button 
+                  variant="outline" 
+                  onClick={() => navigate("/")}
+                  className="gap-2 hidden sm:flex"
+                >
+                  <Home className="w-4 h-4" />
+                  Go to Home
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* MOBILE QUICK NAV */}
+          {activeView === "overview" && mobileMenuOpen && (
+            <Card className="mb-4 sm:hidden">
+              <CardContent className="p-4">
+                <div className="space-y-2">
+                  <h3 className="font-medium text-sm mb-2">Quick Navigation</h3>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="w-full justify-start text-xs"
+                    onClick={() => {
+                      setActiveView("create-challenge");
+                      setMobileMenuOpen(false);
+                    }}
+                  >
+                    <Plus className="w-3 h-3 mr-2" />
+                    New Challenge
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="w-full justify-start text-xs"
+                    onClick={() => {
+                      setActiveView("challenge-management");
+                      setMobileMenuOpen(false);
+                    }}
+                  >
+                    <List className="w-3 h-3 mr-2" />
+                    Manage Challenges
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="w-full justify-start text-xs"
+                    onClick={() => {
+                      setActiveView("schedule-event");
+                      setMobileMenuOpen(false);
+                    }}
+                  >
+                    <Calendar className="w-3 h-3 mr-2" />
+                    New Event
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="w-full justify-start text-xs"
+                    onClick={() => {
+                      setActiveView("admin-notifications");
+                      setMobileMenuOpen(false);
+                    }}
+                  >
+                    <Bell className="w-3 h-3 mr-2" />
+                    Send Announcements
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* MOBILE BACK BUTTON FOR NON-OVERVIEW VIEWS */}
+          {activeView !== "overview" && (
+            <div className="sm:hidden mb-4">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={handleBack}
+                className="w-full gap-2"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                {activeView === "create-challenge" || activeView === "edit-challenge" 
+                  ? "Back to Challenges" 
+                  : "Back to Dashboard"
+                }
+              </Button>
+            </div>
+          )}
+
+          {/* MAIN CONTENT */}
+          <div className={activeView !== "overview" ? "sm:pt-4" : ""}>
+            {loading && activeView === "overview" ? (
+              <div className="flex items-center justify-center min-h-[200px]">
+                <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full"></div>
+                <span className="ml-3 text-sm text-muted-foreground">Loading dashboard...</span>
+              </div>
+            ) : (
+              renderActiveView()
+            )}
+          </div>
+
+          {/* MOBILE FOOTER NAV */}
+          {activeView === "overview" && (
+            <div className="sm:hidden mt-8 pt-4 border-t">
+              <div className="flex justify-between items-center">
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => navigate("/")}
+                  className="text-xs"
+                >
+                  <Home className="w-3 h-3 mr-1" />
+                  Home
+                </Button>
+                <div className="text-xs text-muted-foreground">
+                  {stats.totalUsers} users • {stats.activeChallenges} challenges
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={fetchStats}
+                  className="text-xs"
+                  disabled={loading}
+                >
+                  <RefreshCw className={`w-3 h-3 mr-1 ${loading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </section>
       <Footer />
