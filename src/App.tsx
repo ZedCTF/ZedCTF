@@ -1,3 +1,4 @@
+// App.tsx - Full updated version with writeup routes fixed
 import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { AdminProvider } from './contexts/AdminContext';
@@ -5,11 +6,15 @@ import AuthInitializer from './components/AuthInitializer';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminOnlyRoute from './components/AdminOnlyRoute';
 import UserOnlyRoute from './components/UserOnlyRoute';
+import WriteupRoute from './components/WriteupRoute'; // ADD THIS IMPORT
 import Index from './pages/Index';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Writeups from './pages/Writeups';
+import MyWriteups from './pages/MyWriteups';
 import CreateWriteup from './pages/CreateWriteup';
+import WriteupView from './pages/WriteupView';
+import EditWriteup from './pages/EditWriteup';
 import GitHubCallback from './pages/GitHubCallback';
 import NotFound from './pages/NotFound';
 import Dashboard from './components/Dashboard';
@@ -22,7 +27,7 @@ import AdminDashboard from './components/AdminDashboard';
 import PracticeChallengeDetail from './components/PracticeChallengeDetail';
 // IMPORT THE MULTI-QUESTION COMPONENTS
 import MultiQuestionPracticeChallengeDetails from './components/admin/practice/MultiQuestionPracticeChallengeDetails';
-import MultiLiveEventChallengeDetails from './components/live/MultiLiveEventChallengeDetails'; // ADD THIS IMPORT
+import MultiLiveEventChallengeDetails from './components/live/MultiLiveEventChallengeDetails';
 import LiveEventChallengeDetail from './components/LiveEventChallengeDetail';
 import UpcomingChallengePreview from './components/UpcomingChallengePreview';
 import UpcomingEventDetails from './components/UpcomingEventDetails';
@@ -61,10 +66,49 @@ function App() {
                   <Route path="/leaderboard/live" element={<LiveLeaderboard />} />
                   <Route path="/writeups" element={<Writeups />} />
                   
+                  {/* Writeup Management Route - Protected (Use WriteupRoute for admins too) */}
+                  <Route 
+                    path="/writeups/my" 
+                    element={
+                      <ProtectedRoute>
+                        <WriteupRoute>
+                          <MyWriteups />
+                        </WriteupRoute>
+                      </ProtectedRoute>
+                    } 
+                  />
+                  
+                  {/* Writeup Creation Route - Protected (Use WriteupRoute for admins too) */}
+                  <Route 
+                    path="/writeups/create" 
+                    element={
+                      <ProtectedRoute>
+                        <WriteupRoute>
+                          <CreateWriteup />
+                        </WriteupRoute>
+                      </ProtectedRoute>
+                    } 
+                  />
+                  
+                  {/* Writeup Edit Route - Protected (Use WriteupRoute for admins too) */}
+                  <Route 
+                    path="/writeups/edit/:id" 
+                    element={
+                      <ProtectedRoute>
+                        <WriteupRoute>
+                          <EditWriteup />
+                        </WriteupRoute>
+                      </ProtectedRoute>
+                    } 
+                  />
+                  
+                  {/* Writeup View Route - Public or Protected based on status */}
+                  <Route path="/writeups/:id" element={<WriteupView />} />
+                  
                   {/* User Profile Route */}
                   <Route path="/profile/:userId" element={<UserProfile />} />
                   
-                  {/* Settings Routes - Protected */}
+                  {/* Settings Routes - Protected (Keep UserOnlyRoute for settings) */}
                   <Route 
                     path="/settings/profile" 
                     element={
@@ -130,17 +174,6 @@ function App() {
                     } 
                   />
                   
-                  <Route 
-                    path="/writeups/create" 
-                    element={
-                      <ProtectedRoute>
-                        <UserOnlyRoute>
-                          <CreateWriteup />
-                        </UserOnlyRoute>
-                      </ProtectedRoute>
-                    } 
-                  />
-                  
                   {/* Practice Challenge Detail Routes - Accessible to ALL authenticated users (including admins) */}
                   {/* SINGLE QUESTION CHALLENGES */}
                   <Route 
@@ -152,7 +185,7 @@ function App() {
                     } 
                   />
                   
-                  {/* MULTI-QUESTION CHALLENGES - ADD THIS ROUTE */}
+                  {/* MULTI-QUESTION CHALLENGES */}
                   <Route 
                     path="/practice/multi/:challengeId" 
                     element={
@@ -173,7 +206,7 @@ function App() {
                     } 
                   />
                   
-                  {/* MULTI-QUESTION LIVE EVENT CHALLENGES - ADD THIS NEW ROUTE */}
+                  {/* MULTI-QUESTION LIVE EVENT CHALLENGES */}
                   <Route 
                     path="/live-event/:eventId/multi/:challengeId" 
                     element={
