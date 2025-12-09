@@ -99,7 +99,7 @@ const Signup = () => {
                 <span className="text-3xl font-bold text-foreground">ZedCTF</span>
               </div>
               <h1 className="text-2xl font-bold text-foreground mb-2">Join the Community</h1>
-              <p className="text-muted-foreground">Start your cybersecurity journey today</p>
+              <p className="text-muted-foreground">Start your CTF journey today</p>
             </div>
 
             {/* Error Message */}
@@ -127,7 +127,7 @@ const Signup = () => {
                       value={formData.firstName}
                       onChange={handleChange}
                       className="w-full pl-10 pr-4 py-3 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                      placeholder="John"
+                      placeholder="Jonathan"
                       disabled={isLoading}
                     />
                   </div>
@@ -146,7 +146,7 @@ const Signup = () => {
                       value={formData.lastName}
                       onChange={handleChange}
                       className="w-full pl-10 pr-4 py-3 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                      placeholder="Doe"
+                      placeholder="Banda"
                       disabled={isLoading}
                     />
                   </div>
@@ -168,7 +168,7 @@ const Signup = () => {
                     value={formData.email}
                     onChange={handleChange}
                     className="w-full pl-10 pr-4 py-3 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                    placeholder="hacker@zedctf.com"
+                    placeholder="bandajonathan5@gmail.com"
                     disabled={isLoading}
                   />
                 </div>
@@ -189,7 +189,7 @@ const Signup = () => {
                     value={formData.username}
                     onChange={handleChange}
                     className="w-full pl-10 pr-4 py-3 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                    placeholder="cyber_hacker"
+                    placeholder="banda_jonathan"
                     disabled={isLoading}
                   />
                 </div>

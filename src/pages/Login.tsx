@@ -314,7 +314,7 @@ const Login = () => {
                 <span className="text-3xl font-bold text-foreground">ZedCTF</span>
               </div>
               <h1 className="text-2xl font-bold text-foreground mb-2">Welcome Back</h1>
-              <p className="text-muted-foreground">Access your cybersecurity dashboard</p>
+              <p className="text-muted-foreground">Access your account</p>
             </div>
 
             {/* Error Message */}
@@ -350,7 +350,7 @@ const Login = () => {
                     value={formData.email}
                     onChange={handleChange}
                     className="w-full px-4 py-3 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                    placeholder="hacker@zedctf.com"
+                    placeholder="bandajonathan5@gmail.com"
                     disabled={isLoading || isGitHubLoading}
                   />
                 </div>

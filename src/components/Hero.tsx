@@ -92,18 +92,18 @@ const Hero = () => {
         <div className="max-w-4xl mx-auto text-center space-y-8">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-primary/30 bg-primary/5 mb-4">
             <Flag className="w-4 h-4 text-primary" />
-            <span className="text-sm text-primary font-mono">Zambia's Premier CTF Platform</span>
+            <span className="text-sm text-primary font-mono">Zambian Capture The Flag Platform</span>
           </div>
           
           <h1 className="text-5xl md:text-7xl font-bold leading-tight">
-            Master Cybersecurity
+            Welcome To 
             <br />
-            <span className="neon-text animate-pulse-glow">Capture The Flag</span>
+            <span className="neon-text animate-pulse-glow">ZedCTF</span>
           </h1>
           
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-            Sharpen your hacking skills, compete in real-time challenges, and climb the leaderboard. 
-            From beginner to expert, ZedCTF is your gateway to cybersecurity mastery.
+            Practice real world IT scenarios, participate in live events, host your own events, and
+            create your own write-ups.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">

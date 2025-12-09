@@ -7,16 +7,23 @@ const Footer = () => {
       <div className="container px-4 mx-auto py-12">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
           <div>
-            <div className="flex items-center gap-2 mb-4">
-              <Shield className="w-8 h-8 text-primary" />
-              <span className="text-2xl font-bold neon-text">ZedCTF</span>
-            </div>
-            <p className="text-muted-foreground text-sm">
-              Zambia's premier platform for cybersecurity challenges and training.
-            </p>
-            <p className="text-muted-foreground text-xs mt-2">
-              An initiative by IT Society of Kapasa Makasa University
-            </p>
+            <div className="flex flex-col items-center justify-center">
+  {/* Logo and ZedCTF text */}
+  <div className="flex items-center gap-2 mb-4">
+    <Shield className="w-8 h-8 text-primary" />
+    <span className="text-2xl font-bold neon-text">ZedCTF</span>
+  </div>
+  
+  {/* Description text */}
+  <div className="text-center max-w-xs mx-auto">
+    <p className="text-muted-foreground text-sm">
+      Zambian Capture The Flag Platform
+    </p>
+    <p className="text-muted-foreground text-[0.6rem] mt-2 leading-tight">
+      An initiative by IT Society of Kapasa Makasa University
+    </p>
+  </div>
+</div>
           </div>
 
           <div>
@@ -34,7 +41,7 @@ const Footer = () => {
               </li>
               <li>
                 <Link to="/live" className="hover:text-primary transition-colors">
-                  LIVE Events
+                  LIVE CTF
                 </Link>
               </li>
               <li>
@@ -50,7 +57,7 @@ const Footer = () => {
             <ul className="space-y-2 text-sm text-muted-foreground">
               <li>
                 <Link to="/writeups" className="hover:text-primary transition-colors">
-                  Walkthroughs
+                  Writeups
                 </Link>
               </li>
             </ul>
