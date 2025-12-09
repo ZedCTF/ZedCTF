@@ -6,12 +6,12 @@
 # Home
 Displays real-time platform stastics.
 
-<img width="934" height="445" alt="Image" src="https://github.com/user-attachments/assets/59584199-1617-4ead-aded-aff99d352d2a" />
+<img width="938" height="464" alt="Image" src="https://github.com/user-attachments/assets/8ccd4a74-be63-4a0f-9121-75c67383fa9c" />
 
 # Registration/ Site Access
 If you don't have an account, click on Create an account and fill in the details then login with your credentials.
 
-<img width="820" height="462" alt="Image" src="https://github.com/user-attachments/assets/e9c0ed56-f37c-4bad-bb45-95923e7de603" />
+<img width="866" height="467" alt="Image" src="https://github.com/user-attachments/assets/5548f9d6-80c4-4399-9931-80486b1168c3" />
 
 # Dashboard 
 Track your activity and manage your account.
@@ -83,3 +83,4 @@ Users can create their own walkthroughs for a certain challenge and it will be a
 | [![Mary Chanda](https://img.shields.io/badge/Mary_Chanda-Documentation-lightgrey?style=flat&logo=github)](https://github.com/Kono-hub) | Documentation | Tracks the site documentations and display text |
 | [![Humphery Chileshe](https://img.shields.io/badge/Humphery_Chileshe-Documentation-lightblue?style=flat&logo=github)](https://github.com/threat23) | Documentation | Tracks the site documentations and display text |
 | [![Kulusha Ng'ambi](https://img.shields.io/badge/Kulusha_Ng'ambi-Dev-teal?style=flat&logo=github)](https://github.com/kulusia) | Dev | Developer |
+
