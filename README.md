@@ -61,20 +61,25 @@ Displays the player performance on the platform through the Global and Live pts.
 
    <img width="722" height="473" alt="Image" src="https://github.com/user-attachments/assets/63cd2b5c-12d6-457e-8a69-9470c89eb6a7" />   
    
-2. Live
+2. Live </br>
    Displays real-time event scores for different events and availble to the public.
 
+# Writeups 
+Users can create their own walkthroughs for a certain challenge and it will be approved by the admin. The writeups are also avaible for the public but require login access to create one, comment or like.
+
+<img width="845" height="472" alt="Image" src="https://github.com/user-attachments/assets/f5b02f27-d5bb-469d-9bd0-831f8d87b55b" />
+
+# Contributors 
 
 
-
-| Contributor                 | Role          | Task Description                                                | 
-| --------------------------- | ------------- | --------------------------------------------------------------- | 
-| **James Soko**              | Dev           | Developer and Challenge Creator                                 | 
-| **Abby Mwale**              | Dev           | Working with the frontend                                       | 
-| **Aaron Nyakapanda**        | Creator       | Challenge Creator                                               | 
-| **Joylad Janganzya**        | Developer     | Working with the backend                                        | 
-| **Evans Bwalya**            | Creator       | Challenge Creator                                               | 
-| **William Ziba**            | Reviewer      | Reviews and gives recommendations                               | 
-| **Mary Chanda**             | Documentation | Tracks the site documentations and display text                 | 
-| **Humphery Mwila Chileshe** | Documentation | Tracks the site documentations and display text                 | 
-| **Kulusha Ng'ambi**         | Dev           | Developer                                                       |
+| Contributor | Role | Task Description |
+|------------|------|------------------|
+| [![James Soko](https://img.shields.io/badge/James_Soko-Dev-blue?style=flat&logo=github)](https://github.com/SokoJames) | Dev | Developer and Challenge Creator |
+| [![Abby Mwale](https://img.shields.io/badge/Abby_Mwale-Dev-green?style=flat&logo=github)](https://github.com/abbymwale24) | Dev | Working with the frontend |
+| [![Aaron Nyakapanda](https://img.shields.io/badge/Aaron_Nyakapanda-Creator-purple?style=flat&logo=github)](https://github.com/ronny-brawn) | Creator | Challenge Creator |
+| [![Joylad Jangazya](https://img.shields.io/badge/Joylad_Jangazya-Developer-orange?style=flat&logo=github)](https://github.com/Joylad-Jangazya) | Developer | Working with the backend |
+| [![Evans Bwalya](https://img.shields.io/badge/Evans_Bwalya-Creator-yellow?style=flat&logo=github)](https://github.com/evans0909) | Creator | Challenge Creator |
+| [![William Ziba](https://img.shields.io/badge/William_Ziba-Reviewer-red?style=flat&logo=github)](https://github.com/WilliamZiba404) | Reviewer | Reviews and gives recommendations |
+| [![Mary Chanda](https://img.shields.io/badge/Mary_Chanda-Documentation-lightgrey?style=flat&logo=github)](https://github.com/Kono-hub) | Documentation | Tracks the site documentations and display text |
+| [![Humphery Chileshe](https://img.shields.io/badge/Humphery_Chileshe-Documentation-lightblue?style=flat&logo=github)](https://github.com/threat23) | Documentation | Tracks the site documentations and display text |
+| [![Kulusha Ng'ambi](https://img.shields.io/badge/Kulusha_Ng'ambi-Dev-teal?style=flat&logo=github)](https://github.com/kulusia) | Dev | Developer |

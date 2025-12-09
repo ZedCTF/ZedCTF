@@ -39,44 +39,39 @@ const GlobalLeaderboard = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10); // Show 10 users per page
 
-  // Ranking algorithm with tie-breaking (logic stays but not displayed)
+  // Ranking algorithm with "first come, first served" tie-breaking
   const calculateRanks = (usersData: TopUser[]): TopUser[] => {
     if (usersData.length === 0) return [];
     
-    // Filter out admin users (logic stays)
+    // Filter out admin users
     const nonAdminUsers = usersData.filter(user => user.role !== 'admin');
     
-    // Sort with tie-breaking logic (logic stays)
+    // Sort with "first come, first served" tie-breaking
     const sortedUsers = [...nonAdminUsers].sort((a, b) => {
       // 1. Primary sort: points (descending)
       if (b.points !== a.points) {
         return b.points - a.points;
       }
       
-      // 2. Secondary sort: last solved timestamp (descending - most recent first)
+      // 2. Tie-breaking: "First come, first served"
+      // The user who reached the score EARLIER gets the higher rank
       const aTime = a.lastSolvedAt?.toDate ? a.lastSolvedAt.toDate().getTime() : 
                    a.lastActive?.toDate ? a.lastActive.toDate().getTime() :
-                   a.joinDate?.toDate ? a.joinDate.toDate().getTime() : 0;
+                   a.joinDate?.toDate ? a.joinDate.toDate().getTime() : Infinity;
       const bTime = b.lastSolvedAt?.toDate ? b.lastSolvedAt.toDate().getTime() : 
                    b.lastActive?.toDate ? b.lastActive.toDate().getTime() :
-                   b.joinDate?.toDate ? b.joinDate.toDate().getTime() : 0;
+                   b.joinDate?.toDate ? b.joinDate.toDate().getTime() : Infinity;
       
+      // EARLIER time gets higher rank (lower rank number)
       if (aTime !== bTime) {
-        return bTime - aTime; // Most recent first
+        return aTime - bTime; // Earlier time (smaller number) comes first
       }
       
-      // 3. Tertiary sort: number of challenges solved
-      const aSolvedCount = a.challengesSolved?.length || 0;
-      const bSolvedCount = b.challengesSolved?.length || 0;
-      if (aSolvedCount !== bSolvedCount) {
-        return bSolvedCount - aSolvedCount;
-      }
-      
-      // 4. Final sort: name (alphabetical) for consistent ordering
+      // 3. Fallback: If timestamps are identical, use name for consistent ordering
       return (a.name || '').localeCompare(b.name || '');
     });
     
-    // Calculate ranks with proper tie handling (logic stays)
+    // Calculate ranks with proper tie handling
     const rankedUsers: TopUser[] = [];
     
     sortedUsers.forEach((user, index) => {
@@ -85,29 +80,22 @@ const GlobalLeaderboard = () => {
         // First user always gets rank 1
         rankedUsers.push({ ...user, rank: 1 });
       } else if (user.points === sortedUsers[index - 1].points) {
-        // Same points as previous user - check if also same timestamp for true tie
+        // Same points as previous user
+        // Check if they also have the same timestamp (extremely rare but possible)
         const currentTime = user.lastSolvedAt?.toDate ? user.lastSolvedAt.toDate().getTime() : 
                            user.lastActive?.toDate ? user.lastActive.toDate().getTime() :
-                           user.joinDate?.toDate ? user.joinDate.toDate().getTime() : 0;
+                           user.joinDate?.toDate ? user.joinDate.toDate().getTime() : Infinity;
         const prevTime = sortedUsers[index - 1].lastSolvedAt?.toDate ? sortedUsers[index - 1].lastSolvedAt.toDate().getTime() : 
                         sortedUsers[index - 1].lastActive?.toDate ? sortedUsers[index - 1].lastActive.toDate().getTime() :
-                        sortedUsers[index - 1].joinDate?.toDate ? sortedUsers[index - 1].joinDate.toDate().getTime() : 0;
+                        sortedUsers[index - 1].joinDate?.toDate ? sortedUsers[index - 1].joinDate.toDate().getTime() : Infinity;
         
         if (currentTime === prevTime) {
-          // Check challenges solved count
-          const currentSolved = user.challengesSolved?.length || 0;
-          const prevSolved = sortedUsers[index - 1].challengesSolved?.length || 0;
-          
-          if (currentSolved === prevSolved) {
-            // True tie - same rank as previous user
-            rankedUsers.push({ ...user, rank: rankedUsers[index - 1].rank });
-          } else {
-            // Different solved counts - new rank
-            rankedUsers.push({ ...user, rank: index + 1 });
-          }
+          // If somehow timestamps are identical, they share the same rank (tie)
+          rankedUsers.push({ ...user, rank: rankedUsers[index - 1].rank });
         } else {
-          // Different timestamps - new rank
-          rankedUsers.push({ ...user, rank: index + 1 });
+          // Different timestamps - user who reached score earlier keeps position
+          // Since we sorted by time ascending, previous user had earlier time
+          rankedUsers.push({ ...user, rank: index + 1 }); // New rank
         }
       } else {
         // Different points - new rank
@@ -250,12 +238,12 @@ const GlobalLeaderboard = () => {
       usersData.sort((a, b) => {
         if (b.points !== a.points) return b.points - a.points;
         
-        // Tie-breaking (logic stays)
+        // Tie-breaking: "First come, first served" - EARLIER time gets higher rank
         const aTime = a.lastSolvedAt?.toDate ? a.lastSolvedAt.toDate().getTime() : 
-                     a.lastActive?.toDate ? a.lastActive.toDate().getTime() : 0;
+                     a.lastActive?.toDate ? a.lastActive.toDate().getTime() : Infinity;
         const bTime = b.lastSolvedAt?.toDate ? b.lastSolvedAt.toDate().getTime() : 
-                     b.lastActive?.toDate ? b.lastActive.toDate().getTime() : 0;
-        return bTime - aTime;
+                     b.lastActive?.toDate ? b.lastActive.toDate().getTime() : Infinity;
+        return aTime - bTime; // Changed to aTime - bTime (earlier first)
       });
 
       const rankedUsers = calculateRanks(usersData);
