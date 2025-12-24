@@ -51,6 +51,8 @@ If a challenge is solved, the submission box is locked and a user is able to vie
 4. **Past Events** </br>
    Once an event is done, it shows under this category to track the past event stats.
 
+   <img width="350" height="358" alt="Image" src="https://github.com/user-attachments/assets/d53c0e92-8506-4935-9f6b-de23e599f44a" />
+
 # Leaderboard 
 Displays the player performance on the platform through the Global and Live pts.
 
@@ -83,4 +85,5 @@ Users can create their own walkthroughs for a certain challenge and it will be a
 | [![Mary Chanda](https://img.shields.io/badge/Mary_Chanda-Documentation-lightgrey?style=flat&logo=github)](https://github.com/Kono-hub) | Documentation | Tracks the site documentations and display text |
 | [![Humphery Chileshe](https://img.shields.io/badge/Humphery_Chileshe-Documentation-lightblue?style=flat&logo=github)](https://github.com/threat23) | Documentation | Tracks the site documentations and display text |
 | [![Kulusha Ng'ambi](https://img.shields.io/badge/Kulusha_Ng'ambi-Dev-teal?style=flat&logo=github)](https://github.com/kulusia) | Dev | Developer |
+
 
