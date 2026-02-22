@@ -6,34 +6,36 @@
 # Home
 Displays real-time platform stastics.
 
-<img width="938" height="464" alt="Image" src="https://github.com/user-attachments/assets/8ccd4a74-be63-4a0f-9121-75c67383fa9c" />
+<img width="960" height="475" alt="Image" src="https://github.com/user-attachments/assets/878b14e2-e21a-4150-b718-2a5f7b6ac70e" />
 
 # Registration/ Site Access
 If you don't have an account, click on Create an account and fill in the details then login with your credentials.
 
-<img width="866" height="467" alt="Image" src="https://github.com/user-attachments/assets/5548f9d6-80c4-4399-9931-80486b1168c3" />
+<img width="836" height="473" alt="Image" src="https://github.com/user-attachments/assets/5816d82e-2796-413c-b30d-32039054c6af" />
 
 # Dashboard 
 Track your activity and manage your account.
 
-<img width="790" height="453" alt="Image" src="https://github.com/user-attachments/assets/00b4256f-e196-4c36-a6c3-c32310e4bbd4" />
+<img width="797" height="473" alt="Image" src="https://github.com/user-attachments/assets/c9d590f9-70c4-4d67-b744-8cb8bbd0eba6" />
 
 # Practice 
 Access all the featured challenges for practice in different categories. The categories automatically updates once a new challenge is add and falls in its right category. For example, if we have an Operating System challenge, the OS category will apear.
 
-<img width="538" height="390" alt="Image" src="https://github.com/user-attachments/assets/a8bf8274-4f28-441e-aabe-812a8c9dae36" />
+<img width="951" height="476" alt="Image" src="https://github.com/user-attachments/assets/8426ad04-990c-4fca-b07c-fb11dc3a3236" />
+
+<img width="809" height="476" alt="Image" src="https://github.com/user-attachments/assets/12b93393-d6a5-4fc6-966c-36527b4e93dc" />
 
 ## Challenge Types
 If a challenge is solved, the submission box is locked and a user is able to view the correct submitted flag for future reference, but the challenge is only locked for that user on the platform.
 1. **Single Flag Challenge** </br>
    Requires are single flag for submission and points (pts) are earned based on the rating (easy, medium, hard, or expert)
 
-   <img width="848" height="466" alt="Image" src="https://github.com/user-attachments/assets/bf6fb547-631c-43f9-909e-e373b6d0329f" />
+   <img width="948" height="475" alt="Image" src="https://github.com/user-attachments/assets/e3c220bd-56b5-4ada-9f35-dcbcc72eaab9" />
    
 2. **Multi-Flag Challenge** </br>
    Requires are multiple flags for each question submission and points (pts) are earned based on the question (Q) pts. It tracks the overal performance or progress and once all questions are solved, total pts acumulate based on the overal challenge rating (easy, medium, hard, or expert).
 
-   <img width="837" height="410" alt="Image" src="https://github.com/user-attachments/assets/c81db0ae-9150-4a66-9fc0-e7d7b1b8d0bc" />
+   <img width="942" height="473" alt="Image" src="https://github.com/user-attachments/assets/e11f9ba8-67f3-4919-b3c2-0504e62719f2" />
 
 # LIVE CTF
 1. **Request Hosting** </br>
@@ -45,23 +47,26 @@ If a challenge is solved, the submission box is locked and a user is able to vie
 3. **Upcoming Events** </br>
    Displays future events and this is where participants can register for an event through Mobile Mobile or the manual aproval method.
 
-   <img width="701" height="434" alt="Image" src="https://github.com/user-attachments/assets/fd1f0b7e-b3a8-4156-8a29-7fa3e93079a3" /> </br>
-   <img width="698" height="472" alt="Image" src="https://github.com/user-attachments/assets/a57b12fa-ae07-4063-a9b9-f8760fe35820" />
+   <img width="939" height="470" alt="Image" src="https://github.com/user-attachments/assets/bfbdcc8a-fd4d-493b-bfde-19a1f71ef903" />
+   
+   <img width="941" height="467" alt="Image" src="https://github.com/user-attachments/assets/ae28ecd2-c648-4e4f-8f53-bb7ed415e3d4" />
    
 4. **Past Events** </br>
    Once an event is done, it shows under this category to track the past event stats.
 
-   <img width="350" height="358" alt="Image" src="https://github.com/user-attachments/assets/d53c0e92-8506-4935-9f6b-de23e599f44a" />
+   <img width="939" height="471" alt="Image" src="https://github.com/user-attachments/assets/93418f85-95ac-4ce3-9868-bb145e09d660" />
+
+   <img width="939" height="467" alt="Image" src="https://github.com/user-attachments/assets/6f8d8b63-3c68-453c-b84c-804775171d30" />
 
 # Leaderboard 
 Displays the player performance on the platform through the Global and Live pts.
 
-<img width="702" height="437" alt="Image" src="https://github.com/user-attachments/assets/714e0181-5012-4807-bb8d-b658108db675" />
+<img width="943" height="469" alt="Image" src="https://github.com/user-attachments/assets/40ed3d1c-2bc4-46c4-9d8f-70828afcacdb" />
 
 1. **Global** </br>
    Shows all player (s) total pts on the platform, both from practice and events.
 
-   <img width="722" height="473" alt="Image" src="https://github.com/user-attachments/assets/63cd2b5c-12d6-457e-8a69-9470c89eb6a7" />   
+   <img width="944" height="473" alt="Image" src="https://github.com/user-attachments/assets/94a828cd-e358-4507-953a-951ceeb0acb3" />   
    
 2. Live </br>
    Displays real-time event scores for different events and availble to the public.
@@ -69,7 +74,15 @@ Displays the player performance on the platform through the Global and Live pts.
 # Writeups 
 Users can create their own walkthroughs for a certain challenge and it will be approved by the admin. The writeups are also avaible for the public but require login access to create one, comment or like.
 
-<img width="845" height="472" alt="Image" src="https://github.com/user-attachments/assets/f5b02f27-d5bb-469d-9bd0-831f8d87b55b" />
+<img width="941" height="470" alt="Image" src="https://github.com/user-attachments/assets/76ad0946-dc26-435c-9833-999d3271a7aa" /> </br>
+
+<img width="940" height="473" alt="Image" src="https://github.com/user-attachments/assets/5bf9490f-5245-4c91-9b77-4c9cdcb4499f" /> </br>
+
+<img width="941" height="468" alt="Image" src="https://github.com/user-attachments/assets/084dd47d-6b88-4290-b560-1a06ae577711" /> </br>
+
+<img width="944" height="468" alt="Image" src="https://github.com/user-attachments/assets/b3784595-0c5b-4094-b779-3fa7026ee5b6" /> </br>
+
+<img width="941" height="474" alt="Image" src="https://github.com/user-attachments/assets/fe25bd6f-1cc7-4f5a-99c5-80250dca55d3" /> </br>
 
 # Contributors 
 
@@ -85,5 +98,6 @@ Users can create their own walkthroughs for a certain challenge and it will be a
 | [![Mary Chanda](https://img.shields.io/badge/Mary_Chanda-Documentation-lightgrey?style=flat&logo=github)](https://github.com/Kono-hub) | Documentation | Tracks the site documentations and display text |
 | [![Humphery Chileshe](https://img.shields.io/badge/Humphery_Chileshe-Documentation-lightblue?style=flat&logo=github)](https://github.com/threat23) | Documentation | Tracks the site documentations and display text |
 | [![Kulusha Ng'ambi](https://img.shields.io/badge/Kulusha_Ng'ambi-Dev-teal?style=flat&logo=github)](https://github.com/kulusia) | Dev | Developer |
+
 
 
